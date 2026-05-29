@@ -87,12 +87,14 @@ MCP Client (Claude / Cursor / ...)
 ### Install
 
 ```bash
-# Option 1: pip install (recommended)
+# Recommended: use venv to avoid macOS PEP 668 restrictions
+python3 -m venv .venv && source .venv/bin/activate
 pip install git+https://github.com/ahao0625/HiveMind.git
 
-# Option 2: clone + dev mode
+# Or clone + dev install
 git clone https://github.com/ahao0625/HiveMind.git
 cd HiveMind
+python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
@@ -101,11 +103,7 @@ pip install -e ".[dev]"
 ### Run
 
 ```bash
-# After pip install, use the command directly
 hivemind
-
-# Or in dev mode
-PYTHONPATH=src python3 -m hivemind.server
 ```
 
 ### Verify
