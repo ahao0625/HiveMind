@@ -4,103 +4,103 @@
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![MCP](https://img.shields.io/badge/MCP-1.12%2B-purple)](https://modelcontextprotocol.io)
 
-**外置指挥官框架** — AI 只有建议权，框架拥有执行权。
+**External Commander Framework** — AI suggests, the framework decides.
 
-## 这是什么？
+## What Is This?
 
-当你让 AI 「帮我清理一下桌面文件夹」，它可能会执行 `rm -rf ~/Desktop/*`。你让它「查一下这个 API 的返回」，它可能把你的密钥连同请求一起发到了外部服务。
+When you ask an AI to "clean up my desktop folder," it might run `rm -rf ~/Desktop/*`. When you ask it to "check this API response," it might accidentally send your secret keys to an external service.
 
-**HiveMind 就是 AI 和你电脑之间的一道安检门。** 每次 AI 想操作你的文件、执行命令、发 HTTP 请求时，HiveMind 会先拦住，问六个问题：
+**HiveMind is a security checkpoint between AI and your computer.** Every time an AI tries to touch your files, run a command, or make an HTTP request, HiveMind stops it and asks six questions:
 
-1. 你是谁？（API Key 认证）
-2. 你输入里有没有恶意代码？（注入检测）
-3. 你是不是太频繁了？（限流）
-4. 你想干什么？危险吗？（意图分析）
-5. 规则允许你这么做吗？（硬性门控一票否决 + 软性评分）
-6. 你执行完的结果安全吗？（验证管线）
+1. Who are you? (API Key authentication)
+2. Is there malicious code in your input? (Injection detection)
+3. Are you calling too fast? (Rate limiting)
+4. What exactly are you trying to do? How risky is it? (Intent refinement)
+5. Do the rules allow this? (Hard gates — one vote veto + Soft scoring)
+6. Is the result actually safe? (Verification pipeline)
 
-## 能做到什么？
+## What It Can Do
 
-- 🛡️ **自动拦截危险操作** — `rm -rf /`、读取 `/etc/passwd`、路径 `../../` 遍历，直接拒绝
-- 📊 **智能评分放行** — 读文件自动通过，写文件看情况，删文件严格审批
-- 🔍 **事后验证** — 文件写完了检查是不是 JSON 格式错误、有没有不小心写入了密钥
-- 📝 **全链路审计** — 谁在什么时候做了什么、结果如何、被谁阻止的，全可追溯
-- ⚡ **读写分流** — 纯读操作走快通道（<10ms），写操作走完整安全检查
-- 🧠 **三层记忆** — 工作记忆（当前任务）、短期记忆（带过期时间）、长期记忆（持久化）
+- 🛡️ **Auto-block dangerous ops** — `rm -rf /`, reading `/etc/passwd`, path traversal with `../../` — rejected instantly
+- 📊 **Smart scoring** — read files pass automatically; writes get checked; deletes require strict approval
+- 🔍 **Post-execution verification** — after writing a file, checks for JSON syntax errors, accidental secret leaks
+- 📝 **Full audit trail** — who did what, when, what was the result, who blocked it — all traceable
+- ⚡ **Fast/slow routing** — read-only ops take the fast path (<10ms); writes go through full security checks
+- 🧠 **Three-tier memory** — working memory (per-task), short-term memory (TTL cache), long-term memory (persisted to JSON)
 
-**一句话：让 AI 帮你做事，但别让它乱来。**
+**In one sentence: Let AI help you, but don't let it run wild.**
 
 ---
 
-## 架构
+## Architecture
 
 ```
 MCP Client (Claude / Cursor / ...)
         │
         ▼
 ┌─ Gateway ──────────────────────────────────────────┐
-│  API Key 认证 → 注入检测(命令/SQL/路径遍历) → 令牌桶限流  │
+│  Auth → Injection Detection → Token Bucket Limiter │
 └──────────────────────┬──────────────────────────────┘
                        ▼
 ┌─ Commander ────────────────────────────────────────┐
-│  意图精炼 → 规则引擎(硬门控+软评分) → 仲裁 → 任务路由    │
-│                                                   │
-│  硬性门控: 一票否决  软性评分: ≥60通过 30-59审批 <30拒绝 │
+│  Intent Refinement → Rule Engine → Arbiter → Router│
+│                                                    │
+│  Hard Gates: one-vote veto  Soft: ≥60 pass, <30 no │
 └──────────────────────┬──────────────────────────────┘
                        ▼
 ┌─ Executor ─────────────────────────────────────────┐
-│  文件读写删(沙箱) / Shell命令(二进制白名单) / HTTP(域名白名单) │
+│  File (sandbox) / Shell (allowlist) / HTTP (allowlist) │
 └──────────────────────┬──────────────────────────────┘
                        ▼
 ┌─ Verification Pipeline ────────────────────────────┐
-│  语法校验 → 安全规则(泄露检测) → 结果完整性              │
+│  Syntax → Security (leak scan) → Result integrity  │
 └──────────────────────┬──────────────────────────────┘
                        ▼
 ┌─ Memory ───────────────────────────────────────────┐
-│  工作记忆(单任务) / 短期记忆(TTL) / 长期记忆(JSON持久化)   │
+│  Working / Short-term (TTL) / Long-term (JSON)      │
 └────────────────────────────────────────────────────┘
 ```
 
-### 双层规则引擎
+### Dual-Layer Rule Engine
 
-| 层级 | 机制 | 判定 | 举例 |
-|------|------|------|------|
-| **硬性门控** | 一票否决 | 任一规则不通过 → 立即拒绝 | 禁止删除 `/etc/passwd`、禁止 `rm -rf /` |
-| **软性评分** | 加权求和 | ≥60 自动通过 / 30-59 需人工审批 / <30 拒绝 | 读操作分高、写操作分低、删操作分最低 |
+| Layer | Mechanism | Behavior | Example |
+|-------|-----------|----------|---------|
+| **Hard Gates** | One-vote veto | Any rule fails → rejected immediately | No `rm -rf /`, no reading `/etc/passwd` |
+| **Soft Scoring** | Weighted sum | ≥0.60 auto-approve / 0.30–0.59 human review / <0.30 reject | Read scores high, write lower, delete lowest |
 
 ---
 
-## 快速开始
+## Quick Start
 
-### 安装
+### Install
 
 ```bash
-# 方式一: pip 安装（推荐）
+# Option 1: pip install (recommended)
 pip install git+https://github.com/ahao0625/HiveMind.git
 
-# 方式二: 克隆 + 开发模式
+# Option 2: clone + dev mode
 git clone https://github.com/ahao0625/HiveMind.git
 cd HiveMind
 pip install -e ".[dev]"
 ```
 
-> `structlog` 为可选依赖，未安装时自动退回到 stdlib logging。
+> `structlog` is optional — falls back to stdlib `logging` automatically.
 
-### 启动
+### Run
 
 ```bash
-# pip 安装后直接使用命令
+# After pip install, use the command directly
 hivemind
 
-# 或开发模式
+# Or in dev mode
 PYTHONPATH=src python3 -m hivemind.server
 ```
 
-### 验证
+### Verify
 
 ```bash
 PYTHONPATH=src python3 tests/verify.py
-# 预期输出: Results: 51/51 passed, 0 failed
+# Expected: Results: 51/51 passed, 0 failed
 ```
 
 ```bash
@@ -109,9 +109,9 @@ pytest tests/ -v
 
 ---
 
-## MCP 客户端配置
+## MCP Client Config
 
-### 方式一：pip 安装后（推荐）
+### Option 1: After pip install (recommended)
 
 ```json
 {
@@ -126,7 +126,7 @@ pytest tests/ -v
 }
 ```
 
-### 方式二：开发模式
+### Option 2: Dev mode
 
 ```json
 {
@@ -146,27 +146,27 @@ pytest tests/ -v
 
 ---
 
-## 配置参考
+## Configuration
 
-### 环境变量
+### Environment Variables
 
-| 变量 | 说明 | 默认值 |
-|------|------|--------|
-| `HIVEMIND_API_KEYS` | 逗号分隔的 API Key 列表，为空则不认证 | `""` |
-| `JSON_LOG` | 设为 `1` 输出 JSON 格式日志（生产环境） | 关闭 |
-| `HIVEMIND_CONSTITUTION_PATH` | 自定义规则集配置文件路径 | `~/.hivemind/constitution.json` |
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `HIVEMIND_API_KEYS` | Comma-separated API keys; empty = no auth | `""` |
+| `JSON_LOG` | Set to `1` for JSON-formatted logs (production) | off |
+| `HIVEMIND_CONSTITUTION_PATH` | Custom rule set config file path | `~/.hivemind/constitution.json` |
 
-### 宪法规则文件（constitution.json）
+### Constitution File (constitution.json)
 
-可通过 `HIVEMIND_CONSTITUTION_PATH` 指定自定义规则集：
+Set `HIVEMIND_CONSTITUTION_PATH` to point to a custom rule set:
 
 ```json
 {
   "hard_gates": [
     {
       "id": "no_destructive_commands",
-      "name": "禁止破坏性命令",
-      "description": "阻止 rm -rf、format 等操作",
+      "name": "No Destructive Commands",
+      "description": "Blocks rm -rf, format, etc.",
       "priority": 100,
       "check_function": "hivemind.commander.rule_engine:check_no_destructive_commands"
     }
@@ -174,8 +174,8 @@ pytest tests/ -v
   "scoring_dimensions": [
     {
       "id": "safety",
-      "name": "安全性",
-      "description": "操作的安全程度",
+      "name": "Safety",
+      "description": "How safe is this operation?",
       "weight": 0.40,
       "score_function": "hivemind.commander.rule_engine:score_safety"
     }
@@ -185,96 +185,96 @@ pytest tests/ -v
 }
 ```
 
-> `check_function` / `score_function` 通过 `importlib` 动态加载，支持自定义扩展。
+> `check_function` / `score_function` are loaded dynamically via `importlib`, so you can extend without modifying source code.
 
 ---
 
-## API 参考
+## API Reference
 
-### 工具
+### Tools
 
-#### 文件操作
+#### File Operations
 
-| 工具 | 参数 | 返回 |
-|------|------|------|
-| `read_file` | `path: str` | 文件内容 |
-| `write_file` | `path: str`, `content: str` | `[OK]` 或 `[VERIFICATION FAILED]` |
+| Tool | Parameters | Returns |
+|------|-----------|---------|
+| `read_file` | `path: str` | File contents |
+| `write_file` | `path: str`, `content: str` | `[OK]` or `[VERIFICATION FAILED]` |
 | `delete_file` | `path: str` | `[OK]` |
-| `list_files` | `path: str` (默认 `"."`) | 文件列表 |
+| `list_files` | `path: str` (default `"."`) | Directory listing |
 
 #### Shell
 
-| 工具 | 参数 | 返回 |
-|------|------|------|
-| `run_command` | `command: str`, `cwd: str?` | stdout + 验证警告 |
+| Tool | Parameters | Returns |
+|------|-----------|---------|
+| `run_command` | `command: str`, `cwd: str?` | stdout + verification warnings |
 
-> Shell 执行受二进制白名单保护，只允许安全命令。
+> Shell execution is protected by a binary allowlist — only safe commands can run.
 
 #### HTTP
 
-| 工具 | 参数 |
-|------|------|
+| Tool | Parameters |
+|------|-----------|
 | `http_get` | `url: str` |
 | `http_post` | `url: str`, `body: str`, `content_type: str` |
 | `http_put` | `url: str`, `body: str`, `content_type: str` |
 | `http_delete` | `url: str` |
 
-> HTTP 请求受域名白名单保护。
+> HTTP requests are protected by a domain allowlist.
 
-#### 记忆
+#### Memory
 
-| 工具 | 参数 | 说明 |
-|------|------|------|
-| `store_memory` | `key: str`, `value: str` | 存入长期记忆 |
-| `recall_memory` | `query: str`, `limit: int` | 搜索记忆（短期+长期） |
+| Tool | Parameters | Description |
+|------|-----------|-------------|
+| `store_memory` | `key: str`, `value: str` | Save to long-term memory |
+| `recall_memory` | `query: str`, `limit: int` | Search memory (short-term + long-term) |
 
-#### 可观测性
+#### Observability
 
-| 工具 | 说明 |
-|------|------|
-| `get_constitution` | 查看当前生效的规则集 |
-| `get_audit_trail` | 查看最近 50 条审计记录 |
-| `get_metrics` | 查看计数器/延迟等指标 |
+| Tool | Description |
+|------|------------|
+| `get_constitution` | View the active rule set |
+| `get_audit_trail` | View the last 50 audit records |
+| `get_metrics` | View counters, gauges, latency histograms |
 
-### 资源
+### Resources
 
-| URI | 内容 |
-|-----|------|
-| `hivemind://constitution` | 当前规则集 JSON |
-| `hivemind://status` | 服务器状态 |
+| URI | Content |
+|-----|---------|
+| `hivemind://constitution` | Current rule set as JSON |
+| `hivemind://status` | Server health status |
 
-### 提示
+### Prompts
 
-| 提示 | 用途 |
-|------|------|
-| `plan_task` | 引导 AI 规划任务步骤 |
-| `review_result` | 引导 AI 审查执行结果 |
-| `troubleshoot` | 引导 AI 排查错误 |
-
----
-
-## 安全模型
-
-每一笔工具调用经过六道关卡：
-
-1. **认证** — API Key 校验，拒绝未授权请求
-2. **注入检测** — 命令注入（`; rm -rf /`）、SQL 注入、路径遍历（`../../etc/passwd`）
-3. **令牌桶限流** — 每身份独立桶，防止滥用
-4. **意图精炼** — 自动评估风险等级（low / medium / high / critical）
-5. **规则引擎** — 硬性门控（一票否决）+ 软性评分（加权求和）
-6. **验证管线** — 执行后校验：语法格式 → 密钥泄露扫描 → 结果完整性
-
-### 执行器安全
-
-| 执行器 | 保护措施 |
-|--------|----------|
-| 文件操作 | 限制在沙箱根目录内，禁止遍历逃逸 |
-| Shell 命令 | 二进制白名单，未知命令拒绝执行 |
-| HTTP 请求 | 域名白名单，禁止请求内网地址 |
+| Prompt | Purpose |
+|--------|---------|
+| `plan_task` | Guide AI through task planning |
+| `review_result` | Guide AI through result review |
+| `troubleshoot` | Guide AI through error diagnosis |
 
 ---
 
-## 项目结构
+## Security Model
+
+Every tool call passes through six checkpoints:
+
+1. **Authentication** — API Key validation; reject unauthenticated requests
+2. **Injection Detection** — Command injection (`; rm -rf /`), SQL injection, path traversal (`../../etc/passwd`)
+3. **Rate Limiting** — Token bucket per identity; prevent abuse
+4. **Intent Refinement** — Auto-assess risk level (low / medium / high / critical)
+5. **Rule Engine** — Hard gates (one-vote veto) + Soft scoring (weighted sum)
+6. **Verification Pipeline** — Post-execution: syntax → secret leak scan → result integrity
+
+### Executor Safety
+
+| Executor | Protection |
+|----------|-----------|
+| File Ops | Sandbox root enforcement; path traversal blocked |
+| Shell | Binary allowlist; unknown commands rejected |
+| HTTP | Domain allowlist; internal addresses blocked |
+
+---
+
+## Project Structure
 
 ```
 HiveMind/
@@ -284,41 +284,41 @@ HiveMind/
 ├── .gitignore
 ├── src/hivemind/
 │   ├── __init__.py
-│   ├── config.py              # 所有 Pydantic 配置模型
-│   ├── context.py             # AppContext 运行时状态
-│   ├── server.py              # FastMCP 入口（15 个工具/资源/提示）
+│   ├── config.py              # All Pydantic configuration models
+│   ├── context.py             # AppContext — runtime shared state
+│   ├── server.py              # FastMCP entry point (15 tools/resources/prompts)
 │   ├── gateway/
-│   │   ├── auth.py            # API Key 认证
-│   │   ├── injection.py       # 注入检测（命令/SQL/路径遍历）
-│   │   ├── rate_limiter.py    # 令牌桶限流
-│   │   └── audit.py           # 审计日志（环形缓冲区）
+│   │   ├── auth.py            # API Key authentication
+│   │   ├── injection.py       # Injection detection (command/SQL/path traversal)
+│   │   ├── rate_limiter.py    # Token bucket rate limiter
+│   │   └── audit.py           # Audit log (ring buffer)
 │   ├── commander/
-│   │   ├── intent_refiner.py  # 意图精炼 + 风险分级
-│   │   ├── rule_engine.py     # 硬门控 + 软评分引擎
-│   │   ├── arbiter.py         # 最终仲裁决策
-│   │   ├── task_router.py     # 系统1(快)/系统2(慢) 分流
-│   │   ├── state_manager.py   # 任务状态机
-│   │   └── lifecycle.py       # 核心编排器
+│   │   ├── intent_refiner.py  # Intent refinement + risk classification
+│   │   ├── rule_engine.py     # Hard gates + soft scoring engine
+│   │   ├── arbiter.py         # Final arbitration
+│   │   ├── task_router.py     # System 1 (fast) / System 2 (full) routing
+│   │   ├── state_manager.py   # Task state machine (FSM)
+│   │   └── lifecycle.py       # Central orchestrator
 │   ├── executors/
-│   │   ├── base.py            # 抽象基类
-│   │   ├── file_ops.py        # 沙箱文件读写删
-│   │   ├── shell_ops.py       # 白名单 Shell 执行
-│   │   └── http_ops.py        # 域名白名单 HTTP
+│   │   ├── base.py            # Abstract base class
+│   │   ├── file_ops.py        # Sandboxed file read/write/delete
+│   │   ├── shell_ops.py       # Allowlist-based shell execution
+│   │   └── http_ops.py        # Domain-allowlist HTTP client
 │   ├── verification/
-│   │   ├── base.py            # 抽象基类
-│   │   ├── pipeline.py        # 管线编排器（支持 fail_fast）
-│   │   ├── syntax_check.py    # JSON/YAML 语法校验
-│   │   ├── security_check.py  # API Key/私钥泄露扫描
-│   │   └── result_check.py    # 退出码/完整性检查
+│   │   ├── base.py            # Abstract base class
+│   │   ├── pipeline.py        # Pipeline orchestrator (supports fail_fast)
+│   │   ├── syntax_check.py    # JSON/YAML syntax validation
+│   │   ├── security_check.py  # API key / private key leak scanner
+│   │   └── result_check.py    # Exit code / integrity check
 │   ├── memory/
-│   │   ├── working.py         # 工作记忆（单任务隔离）
-│   │   ├── short_term.py      # 短期记忆（TTL 缓存）
-│   │   └── long_term.py       # 长期记忆（JSON 文件持久化）
+│   │   ├── working.py         # Working memory (per-task isolation)
+│   │   ├── short_term.py      # Short-term memory (TTL cache)
+│   │   └── long_term.py       # Long-term memory (JSON file persistence)
 │   └── observability/
-│       ├── logger.py          # structlog / stdlib 双模
-│       └── metrics.py         # 计数器/仪表盘/直方图
+│       ├── logger.py          # structlog / stdlib dual-mode
+│       └── metrics.py         # Counters, gauges, histograms
 └── tests/
-    ├── verify.py              # 独立验证脚本（51 项检查）
+    ├── verify.py              # Standalone verification (51 checks)
     ├── test_rule_engine.py
     ├── test_gateway.py
     └── test_verification.py
@@ -326,71 +326,73 @@ HiveMind/
 
 ---
 
-## 设计原则
+## Design Principles
 
-- **不可变数据** — 所有 Pydantic 模型 `frozen=True`，只创建不修改
-- **宪法即代码** — 规则集通过 JSON 配置，`importlib` 动态加载，无需改源码即可扩展
-- **全链路审计** — 网关→仲裁→执行→验证，每步可追溯
-- **系统 1/2 分流** — 缓存命中 + 低风险走快通道（<10ms），高风险走完整 ReAct 验证
+- **Immutability** — All Pydantic models are `frozen=True`; create, never mutate
+- **Constitution as Code** — Rules via JSON config, loaded dynamically with `importlib`; extend without touching source
+- **Full Audit Trail** — Gateway → Arbiter → Executor → Verification, every step traceable
+- **System 1/2 Routing** — Cache hits + low risk take the fast path; writes + high risk go through full verification
 
-## 常见问题
+---
 
-### API Key 是什么？我用 Claude 还需要再设一个 Key？
+## FAQ
 
-`HIVEMIND_API_KEYS` 不是任何第三方服务的 Key，而是 **HiveMind 自己的门锁密码**。
+### What is the API Key for? I already have a Claude API key.
 
-Claude 的 API Key 是你和 Anthropic 之间的身份凭证，HiveMind 的 Key 是 MCP 客户端和 HiveMind 安检门之间的身份凭证——两把不同的钥匙。
+`HIVEMIND_API_KEYS` is not a third-party service key — it's **HiveMind's own door lock**.
 
-不设也可以，留空跳过认证。设上只是多一层保障，防止不认识的 MCP 客户端连进来操作你的文件。
+Your Claude API key identifies you to Anthropic. HiveMind's key identifies the MCP client to HiveMind. Two different keys for two different doors.
 
-### 为什么我的命令被拦截了？
+You can leave it empty to skip authentication entirely. Setting it just adds an extra layer so unknown MCP clients can't connect and operate on your files.
 
-HiveMind 有两层拦截：
+### Why was my command blocked?
 
-- **硬性门控** — 无条件拒绝。比如 `rm -rf /`、读取 `/etc/passwd`、路径包含 `../` 穿越，这条规则没商量
-- **软性评分** — 按风险打分。写文件、删文件比读文件分低，低于阈值会被要求人工审批
+Two possible layers:
 
-如果你确定某个操作是安全的但被误拦了，可以用 `get_constitution` 查看当前规则，然后自定义 `constitution.json` 调整。
+- **Hard gate** — Unconditional rejection. For example, `rm -rf /`, reading `/etc/passwd`, path traversal with `../` are always blocked.
+- **Soft scoring** — Risk-weighted. Writes and deletes score lower than reads. Below threshold, human approval is required.
 
-### 报错 "ImportError: cannot import name ..."
+If a safe operation is being falsely blocked, run `get_constitution` to see the active rules, then customize your `constitution.json`.
 
-绝大多数情况是因为 `PYTHONPATH` 没设对。确认：
+### "ImportError: cannot import name ..."
+
+Almost always a `PYTHONPATH` issue. Make sure you're in the project root:
 
 ```bash
 PYTHONPATH=src python3 -m hivemind.server
-#                          ↑ 必须在 HiveMind 根目录执行
+#                          ↑ must be run from HiveMind root directory
 ```
 
-如果用 pip 安装后命令行启动则不需要设 `PYTHONPATH`：
+Or skip `PYTHONPATH` entirely by installing with pip:
 
 ```bash
 pip install git+https://github.com/ahao0625/HiveMind.git
 hivemind
 ```
 
-### structlog 安装不上怎么办？
+### Can't install structlog?
 
-structlog 是可选依赖，没安装时自动退回到 Python 标准库 `logging`，功能完整可用。只是日志格式从彩色结构化变成普通文本，不影响任何功能。
+structlog is optional. Without it, HiveMind falls back to Python's standard `logging` module. All features work identically — you just get plain-text logs instead of colored structured output.
 
-### FileOpsExecutor 报 PermissionError
+### FileOpsExecutor: PermissionError
 
-默认沙箱目录在 `$TMPDIR/hivemind-sandbox`，某些系统（如 macOS 沙箱）禁止写 `/tmp`。可以手动指定：
+The default sandbox directory is `$TMPDIR/hivemind-sandbox`. On some systems (e.g. macOS sandbox), writing to `/tmp` is restricted. Override it:
 
 ```bash
 export HIVEMIND_SANDBOX_ROOT="$HOME/.hivemind/sandbox"
 ```
 
-### 怎么扩展自己的安全规则？
+### How do I add custom security rules?
 
-创建 `~/.hivemind/constitution.json`，添加自定义硬性门控或评分维度：
+Create `~/.hivemind/constitution.json` and add your own hard gates or scoring dimensions:
 
 ```json
 {
   "hard_gates": [
     {
       "id": "custom_rule",
-      "name": "我的自定义规则",
-      "description": "禁止修改 .env 文件",
+      "name": "My Custom Rule",
+      "description": "Prevents modifying .env files",
       "priority": 50,
       "check_function": "my_module.rules:check_env_file"
     }
@@ -398,19 +400,19 @@ export HIVEMIND_SANDBOX_ROOT="$HOME/.hivemind/sandbox"
 }
 ```
 
-`check_function` 格式为 `模块路径:函数名`，HiveMind 会通过 `importlib` 动态加载。函数签名：
+The format for `check_function` is `module.path:function_name`. HiveMind loads it dynamically via `importlib`. Function signature:
 
 ```python
 def check_env_file(intent: RefinedIntent) -> GateResult:
     ...
 ```
 
-### 怎么看到底发生了什么？
+### How do I see what happened?
 
-用 `get_audit_trail` 工具查看最近 50 条审计记录，每条包含：时间、调用者、工具名、网关结果、仲裁决定、执行结果、验证结果。
+Use the `get_audit_trail` tool to view the last 50 audit records. Each entry includes: timestamp, caller identity, tool name, gateway result, arbiter decision, execution result, and verification result.
 
 ---
 
-## 许可
+## License
 
 MIT
