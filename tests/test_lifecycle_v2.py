@@ -84,8 +84,8 @@ class TestBasicExecution:
 class TestVerificationPipeline:
     @pytest.mark.asyncio
     async def test_invalid_json_triggers_verification_failure(self, lifecycle):
-        r = await lifecycle.execute("write_file", {"path": "bad.json", "content": "{invalid}"}, identity="test", api_key="hivemind-dev-key")
-        # should be blocked by verification (syntax check fails)
+        # Use content that passes injection but fails JSON syntax verification
+        r = await lifecycle.execute("write_file", {"path": "bad.json", "content": "this is not valid json"}, identity="test", api_key="hivemind-dev-key")
         assert "Verification failed" in r.reason
 
 
