@@ -444,3 +444,18 @@ def check_env_file(intent: RefinedIntent) -> GateResult:
 ## 许可
 
 MIT
+
+---
+
+## 打赏
+
+如果这个项目对你有帮助，欢迎请我喝杯咖啡 ☕
+
+<div align="center">
+  <table>
+    <tr>
+      <td align="center" width="50%"><b>微信</b><br><br><img src="assets/wechat.jpg" width="280"></td>
+      <td align="center" width="50%"><b>支付宝</b><br><br><img src="assets/alipay.jpg" width="280"></td>
+    </tr>
+  </table>
+</div>

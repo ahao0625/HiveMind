@@ -444,3 +444,18 @@ Use the `get_audit_trail` tool to view the last 50 audit records. Each entry inc
 ## License
 
 MIT
+
+---
+
+## Sponsor
+
+If this project helps you, consider buying me a coffee ☕
+
+<div align="center">
+  <table>
+    <tr>
+      <td align="center" width="50%"><b>WeChat</b><br><br><img src="assets/wechat.jpg" width="280"></td>
+      <td align="center" width="50%"><b>Alipay</b><br><br><img src="assets/alipay.jpg" width="280"></td>
+    </tr>
+  </table>
+</div>
