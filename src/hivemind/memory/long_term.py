@@ -3,6 +3,7 @@
 import asyncio
 import json
 import os
+import tempfile
 from datetime import datetime, timezone
 from hivemind.memory.short_term import MemoryEntry
 
@@ -23,9 +24,20 @@ class LongTermMemory:
         except (json.JSONDecodeError, OSError): pass
 
     def _save(self) -> None:
-        os.makedirs(os.path.dirname(self._path), exist_ok=True)
-        with open(self._path, "w") as f:
-            json.dump({k: v.model_dump() for k, v in self._store.items()}, f, indent=2, default=str)
+        """Atomic save via temp file + os.replace to prevent corruption on crash."""
+        dir_path = os.path.dirname(self._path)
+        os.makedirs(dir_path, exist_ok=True)
+        fd, tmp_path = tempfile.mkstemp(dir=dir_path or None, suffix=".json")
+        try:
+            with os.fdopen(fd, "w") as f:
+                json.dump(
+                    {k: v.model_dump() for k, v in self._store.items()},
+                    f, indent=2, default=str,
+                )
+            os.replace(tmp_path, self._path)
+        except Exception:
+            os.unlink(tmp_path)
+            raise
 
     async def store(self, key: str, value: str, metadata: dict | None = None) -> MemoryEntry:
         entry = MemoryEntry(key=key, value=value, metadata=metadata or {})

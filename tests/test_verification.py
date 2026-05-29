@@ -1,4 +1,4 @@
-"""Tests for HiveMind Verification Pipeline."""
+"""Tests for HiveMind Verification Pipeline (v2.0: extended scope)."""
 
 import pytest
 from hivemind.commander.intent_refiner import IntentRefiner
@@ -10,7 +10,8 @@ from hivemind.verification.pipeline import VerificationPipeline
 
 
 @pytest.fixture
-def refiner(): return IntentRefiner()
+def refiner():
+    return IntentRefiner()
 
 
 class TestSyntaxVerifier:
@@ -38,7 +39,7 @@ class TestSyntaxVerifier:
 
 class TestSecurityVerifier:
     @pytest.mark.asyncio
-    async def test_detects_api_key(self, refiner):
+    async def test_detects_api_key_in_write(self, refiner):
         v = SecurityVerifier()
         intent = refiner.refine("write_file", {"path": "x.txt", "content": 'api_key="sk-abcdefghijklmnopqrstuvwxyz"'})
         r = await v.verify(intent, ExecutorResult(success=True, output="ok"))
@@ -49,6 +50,36 @@ class TestSecurityVerifier:
         v = SecurityVerifier()
         intent = refiner.refine("write_file", {"path": "x.txt", "content": "hello"})
         r = await v.verify(intent, ExecutorResult(success=True, output="ok"))
+        assert r.passed is True
+
+    # v2.0: read_file output scanning
+    @pytest.mark.asyncio
+    async def test_detects_api_key_in_read_output(self, refiner):
+        v = SecurityVerifier()
+        intent = refiner.refine("read_file", {"path": "secrets.env"})
+        r = await v.verify(intent, ExecutorResult(success=True, output='api_key="sk-longsecrethere1234567"'))
+        assert r.passed is False
+
+    @pytest.mark.asyncio
+    async def test_clean_read_output_passes(self, refiner):
+        v = SecurityVerifier()
+        intent = refiner.refine("read_file", {"path": "data.json"})
+        r = await v.verify(intent, ExecutorResult(success=True, output='{"name": "hello", "value": 42}'))
+        assert r.passed is True
+
+    # v2.0: http_* response scanning
+    @pytest.mark.asyncio
+    async def test_detects_api_key_in_http_response(self, refiner):
+        v = SecurityVerifier()
+        intent = refiner.refine("http_get", {"url": "https://api.example.com/keys"})
+        r = await v.verify(intent, ExecutorResult(success=True, output='{"token": "AKIA1234567890ABCDEF"}'))
+        assert r.passed is False
+
+    @pytest.mark.asyncio
+    async def test_clean_http_response_passes(self, refiner):
+        v = SecurityVerifier()
+        intent = refiner.refine("http_get", {"url": "https://api.example.com/data"})
+        r = await v.verify(intent, ExecutorResult(success=True, output='{"status": "ok"}'))
         assert r.passed is True
 
 

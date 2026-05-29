@@ -18,10 +18,9 @@ from hivemind.context import AppContext
 from hivemind.observability import setup_logger, MetricsCollector
 from hivemind.gateway import AuthGuard, InjectionDetector, TokenBucketRateLimiter, AuditLogger
 from hivemind.commander import RuleEngine, Arbiter, TaskRouter, StateManager, TaskLifecycle
-from hivemind.commander.intent_refiner import IntentRefiner
 from hivemind.executors import FileOpsExecutor, ShellOpsExecutor, HttpOpsExecutor
 from hivemind.verification import VerificationPipeline, SyntaxVerifier, SecurityVerifier, ResultVerifier
-from hivemind.memory import WorkingMemory, ShortTermMemory, LongTermMemory
+from hivemind.memory import MemorySystem
 
 # ── Lifespan ─────────────────────────────────────────────────────
 
@@ -47,15 +46,21 @@ async def app_lifespan(server: FastMCP):
     router = TaskRouter()
     state_manager = StateManager()
 
-    # Memory
-    working_mem = WorkingMemory(config.memory.working.max_bytes)
-    short_term_mem = ShortTermMemory(config.memory.short_term.max_items, config.memory.short_term.default_ttl_seconds)
-    long_term_mem = LongTermMemory(config.memory.long_term.persistence_path)
+    # Memory (v2.0: unified MemorySystem facade)
+    memory_system = MemorySystem(config.memory)
 
-    # Lifecycle (central coordinator)
+    # Verification
+    verifiers = []
+    if "syntax" in config.verification.enabled_checks: verifiers.append(SyntaxVerifier())
+    if "security" in config.verification.enabled_checks: verifiers.append(SecurityVerifier())
+    if "result" in config.verification.enabled_checks: verifiers.append(ResultVerifier())
+    verification = VerificationPipeline(verifiers, config.verification.fail_fast)
+
+    # Lifecycle (central coordinator, v2.0: verifier wired in)
     lifecycle = TaskLifecycle(
         config, auth, injection, rate_limiter, audit, metrics,
-        rule_engine, arbiter, router, state_manager, long_term_mem,
+        rule_engine, arbiter, router, state_manager, memory_system,
+        verifier=verification,
     )
 
     # Executors
@@ -68,17 +73,10 @@ async def app_lifespan(server: FastMCP):
     for tn in ("http_get", "http_post", "http_put", "http_delete"):
         lifecycle.register_executor(tn, http_exec)
 
-    # Verification
-    verifiers = []
-    if "syntax" in config.verification.enabled_checks: verifiers.append(SyntaxVerifier())
-    if "security" in config.verification.enabled_checks: verifiers.append(SecurityVerifier())
-    if "result" in config.verification.enabled_checks: verifiers.append(ResultVerifier())
-    verification = VerificationPipeline(verifiers, config.verification.fail_fast)
-
     ctx = AppContext(config=config, logger=logger, gateway=auth, commander=lifecycle,
                      executors={"file": file_exec, "shell": shell_exec, "http": http_exec},
                      verifier=verification,
-                     memory={"working": working_mem, "short_term": short_term_mem, "long_term": long_term_mem},
+                     memory=memory_system,
                      metrics=metrics)
     logger.info("hivemind_started version=%s", config.server.version)
     try:
@@ -116,11 +114,6 @@ async def write_file(path: str, content: str, ctx: Context[ServerSession, AppCon
     r = await app.commander.execute("write_file", {"path": path, "content": content})
     if r.blocked: return f"[BLOCKED] {r.reason}"
     if not r.success: return f"[ERROR] {r.reason}"
-    intent = IntentRefiner().refine("write_file", {"path": path, "content": content})
-    ver = await app.verifier.verify(intent, r.data)
-    if not ver.all_passed:
-        issues = [i for vr in ver.results for i in vr.issues]
-        return f"[VERIFICATION FAILED] {', '.join(issues)}"
     return f"[OK] {r.data.output}"
 
 @mcp.tool()
@@ -149,13 +142,7 @@ async def run_command(command: str, cwd: str | None = None, ctx: Context[ServerS
     r = await app.commander.execute("run_command", params)
     if r.blocked: return f"[BLOCKED] {r.reason}"
     if not r.success: return f"[ERROR] {r.reason}"
-    intent = IntentRefiner().refine("run_command", params)
-    ver = await app.verifier.verify(intent, r.data)
-    out = r.data.output or r.data.stdout or "(no output)"
-    if not ver.all_passed:
-        issues = [i for vr in ver.results for i in vr.issues]
-        return f"[WARN] {out}\n[VERIFICATION] {', '.join(issues)}"
-    return out
+    return r.data.output or getattr(r.data, 'stdout', '') or "(no output)"
 
 # ── HTTP Tools ───────────────────────────────────────────────────
 
@@ -196,10 +183,9 @@ async def store_memory(key: str, value: str, ctx: Context[ServerSession, AppCont
 @mcp.tool()
 async def recall_memory(query: str, limit: int = 10, ctx: Context[ServerSession, AppContext] = None) -> str:
     app = _ctx(ctx)
-    results = await app.memory["long_term"].search(query, limit)
-    if not results: results = await app.memory["short_term"].search(query, limit)
+    results = await app.memory.search_all(query, limit)
     if not results: return "No matching memory entries found."
-    lines = [f"- **{r.key}** (accessed {r.access_count}x): {r.value[:120].replace(chr(10), ' ')}..." for r in results]
+    lines = [f"- **{r['key']}** [{r['tier']}]: {r.get('value', '')[:120].replace(chr(10), ' ')}..." for r in results]
     return "\n".join(lines)
 
 # ── Observability Tools ──────────────────────────────────────────

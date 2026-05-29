@@ -16,13 +16,24 @@ class SecurityVerifier(Verifier):
 
     async def verify(self, intent: RefinedIntent, result: ExecutorResult) -> VerifyResult:
         issues: list[str] = []
+        content_to_scan: str = ""
+
         if intent.tool_name == "write_file":
-            content = intent.parameters.get("content", "")
-            for name, pattern in self.SECRET_PATTERNS:
-                if pattern.search(content): issues.append(f"Potential {name} in file content")
-        if intent.tool_name == "run_command":
-            for name, pattern in self.SECRET_PATTERNS:
-                if pattern.search(result.stdout) or pattern.search(result.stderr):
-                    issues.append(f"Potential {name} in command output")
-        if issues: return VerifyResult(passed=False, verifier_name="security", issues=issues, score=0.0)
+            # Scan the content being written
+            content_to_scan = intent.parameters.get("content", "")
+        elif intent.tool_name in ("read_file", "http_get", "http_post", "http_put", "http_delete"):
+            # v2.0: scan output from read_file and http_* responses
+            content_to_scan = getattr(result, 'output', '') or ''
+        elif intent.tool_name == "run_command":
+            # Scan stdout and stderr
+            stdout = getattr(result, 'stdout', '') or ''
+            stderr = getattr(result, 'stderr', '') or ''
+            content_to_scan = stdout + stderr
+
+        for name, pattern in self.SECRET_PATTERNS:
+            if pattern.search(content_to_scan):
+                issues.append(f"Potential {name} in output")
+
+        if issues:
+            return VerifyResult(passed=False, verifier_name="security", issues=issues, score=0.0)
         return VerifyResult(passed=True, verifier_name="security", score=1.0)

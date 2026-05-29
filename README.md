@@ -5,29 +5,24 @@
 [![MCP](https://img.shields.io/badge/MCP-1.12%2B-purple)](https://modelcontextprotocol.io)
 [English](README.md) | [中文](README_CN.md)
 
-**External Commander Framework** — AI suggests, the framework decides.
+**External Commander Framework** — AI thinks. The framework decides.
 
 ## What Is This?
 
-When you ask an AI to "clean up my desktop folder," it might run `rm -rf ~/Desktop/*`. When you ask it to "check this API response," it might accidentally send your secret keys to an external service.
+Every time AI runs a command or touches a file, you're gambling. Stuffing "never do X" into the prompt doesn't help — it forgets, and your tokens go up in smoke.
 
-**HiveMind is a security checkpoint between AI and your computer.** Every time an AI tries to touch your files, run a command, or make an HTTP request, HiveMind stops it and asks six questions:
-
-1. Who are you? (API Key authentication)
-2. Is there malicious code in your input? (Injection detection)
-3. Are you calling too fast? (Rate limiting)
-4. What exactly are you trying to do? How risky is it? (Intent refinement)
-5. Do the rules allow this? (Hard gates — one vote veto + Soft scoring)
-6. Is the result actually safe? (Verification pipeline)
+HiveMind does one thing: **AI thinks. The framework decides.** What's allowed, what's not, and whether the result checks out — all enforced outside the prompt. Operations you approve once shortcut forever after. Doesn't eat your tokens. Gets faster the more you use it.
 
 ## What It Can Do
 
-- 🛡️ **Auto-block dangerous ops** — `rm -rf /`, reading `/etc/passwd`, path traversal with `../../` — rejected instantly
-- 📊 **Smart scoring** — read files pass automatically; writes get checked; deletes require strict approval
-- 🔍 **Post-execution verification** — after writing a file, checks for JSON syntax errors, accidental secret leaks
-- 📝 **Full audit trail** — who did what, when, what was the result, who blocked it — all traceable
-- ⚡ **Fast/slow routing** — read-only ops take the fast path (<10ms); writes go through full security checks
-- 🧠 **Three-tier memory** — working memory (per-task), short-term memory (TTL cache), long-term memory (persisted to JSON)
+- 🛡️ **Two-layer injection defense** — Structural guard validates each parameter's characters, type, and length; Semantic classifier blocks known attacks (≥95% confidence) and silently downgrades suspicious input (50–95%)
+- 📊 **Smart scoring** — Read files pass automatically; writes get checked; deletes require strict approval
+- 🔍 **Post-execution verification** — Syntax check, secret leak scan (API keys, JWTs, private keys), result integrity — with automatic rollback on failure
+- ⚡ **System 1/2 routing** — Read-only ops take the fast path (<10ms); writes go through full security → execute → verify → record
+- 🧠 **Four-tier memory** — Working (per-task), Short-term (TTL), Long-term (JSON), Procedural (env snapshots for "faster with use")
+- 🔄 **Rollback on failure** — Pre-write snapshots; verification fails → file restored automatically
+- 🌐 **SSRF protection** — Internal IP blocking (RFC1918, loopback, multicast) + redirect guard on every hop
+- 📝 **Full audit trail** — Who did what, when, which layer blocked it, what the final score was — all traceable
 
 **In one sentence: Let AI help you, but don't let it run wild.**
 
@@ -39,27 +34,36 @@ When you ask an AI to "clean up my desktop folder," it might run `rm -rf ~/Deskt
 MCP Client (Claude / Cursor / ...)
         │
         ▼
-┌─ Gateway ──────────────────────────────────────────┐
-│  Auth → Injection Detection → Token Bucket Limiter │
-└──────────────────────┬──────────────────────────────┘
+┌─ Gateway ───────────────────────────────────────────────────┐
+│  Auth → Structural Guard (per-param slots)                  │
+│       → Semantic Classifier (confidence: block/downgrade/log)│
+│       → Token Bucket Rate Limiter                           │
+└──────────────────────┬───────────────────────────────────────┘
                        ▼
-┌─ Commander ────────────────────────────────────────┐
-│  Intent Refinement → Rule Engine → Arbiter → Router│
-│                                                    │
-│  Hard Gates: one-vote veto  Soft: ≥60 pass, <30 no │
-└──────────────────────┬──────────────────────────────┘
+┌─ Commander ─────────────────────────────────────────────────┐
+│  Intent Refinement → Rule Engine → Arbiter → Task Router    │
+│                                                             │
+│  Hard Gates: one-vote veto   Soft Scoring: weighted sum     │
+│  System 1 (cached → verify env → fast path)                 │
+│  System 2 (execute → verify pipeline → record → audit)     │
+└──────────────────────┬───────────────────────────────────────┘
                        ▼
-┌─ Executor ─────────────────────────────────────────┐
-│  File (sandbox) / Shell (allowlist) / HTTP (allowlist) │
-└──────────────────────┬──────────────────────────────┘
+┌─ Executor ──────────────────────────────────────────────────┐
+│  File (sandbox + pre-mutation snapshots)                    │
+│  Shell (binary allowlist)                                   │
+│  HTTP (domain allowlist + SSRF + redirect guard)            │
+└──────────────────────┬───────────────────────────────────────┘
                        ▼
-┌─ Verification Pipeline ────────────────────────────┐
-│  Syntax → Security (leak scan) → Result integrity  │
-└──────────────────────┬──────────────────────────────┘
+┌─ Verification Pipeline ─────────────────────────────────────┐
+│  Syntax → Security (secret leak scan) → Result integrity    │
+│  ┌─ Fail → rollback (restore from snapshot)                │
+│  └─ Pass → cleanup snapshot + record procedural memory     │
+└──────────────────────┬───────────────────────────────────────┘
                        ▼
-┌─ Memory ───────────────────────────────────────────┐
-│  Working / Short-term (TTL) / Long-term (JSON)      │
-└────────────────────────────────────────────────────┘
+┌─ Memory (4 tiers) ──────────────────────────────────────────┐
+│  Working (task) / Short-term (TTL) / Long-term (JSON)       │
+│  Procedural (env snapshots → faster with use)               │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ### Dual-Layer Rule Engine
@@ -67,7 +71,14 @@ MCP Client (Claude / Cursor / ...)
 | Layer | Mechanism | Behavior | Example |
 |-------|-----------|----------|---------|
 | **Hard Gates** | One-vote veto | Any rule fails → rejected immediately | No `rm -rf /`, no reading `/etc/passwd` |
-| **Soft Scoring** | Weighted sum | ≥0.60 auto-approve / 0.30–0.59 human review / <0.30 reject | Read scores high, write lower, delete lowest |
+| **Soft Scoring** | Weighted sum (5 dimensions) | ≥0.40 auto-approve / 0.40–0.70 human review / <0.30 reject | Read scores high, write lower, delete lowest |
+
+### Two-Layer Injection Detection
+
+| Layer | Type | Mechanism | False Positives |
+|-------|------|-----------|-----------------|
+| **Structural Guard** | Deterministic | Per-parameter slot: character allowlist, type constraint, max length | Zero |
+| **Semantic Classifier** | Confidence-based | ≥95% → hard block / 50–95% → silent downgrade / 30–50% → log only | Near-zero |
 
 ---
 
@@ -101,7 +112,7 @@ PYTHONPATH=src python3 -m hivemind.server
 
 ```bash
 PYTHONPATH=src python3 tests/verify.py
-# Expected: Results: 51/51 passed, 0 failed
+# Expected: Results: 79/79 passed, 0 failed
 ```
 
 ```bash
@@ -220,7 +231,7 @@ Set `HIVEMIND_CONSTITUTION_PATH` to point to a custom rule set:
 | `http_put` | `url: str`, `body: str`, `content_type: str` |
 | `http_delete` | `url: str` |
 
-> HTTP requests are protected by a domain allowlist.
+> HTTP requests are protected by domain allowlist, internal IP blocking (SSRF), and redirect guard.
 
 #### Memory
 
@@ -256,22 +267,23 @@ Set `HIVEMIND_CONSTITUTION_PATH` to point to a custom rule set:
 
 ## Security Model
 
-Every tool call passes through six checkpoints:
+Every tool call passes through seven checkpoints:
 
 1. **Authentication** — API Key validation; reject unauthenticated requests
-2. **Injection Detection** — Command injection (`; rm -rf /`), SQL injection, path traversal (`../../etc/passwd`)
-3. **Rate Limiting** — Token bucket per identity; prevent abuse
-4. **Intent Refinement** — Auto-assess risk level (low / medium / high / critical)
-5. **Rule Engine** — Hard gates (one-vote veto) + Soft scoring (weighted sum)
-6. **Verification Pipeline** — Post-execution: syntax → secret leak scan → result integrity
+2. **Structural Guard** — Per-parameter slot validation (character allowlist, type constraints, length limits); deterministic, zero false positives
+3. **Semantic Classifier** — Confidence-based attack detection: ≥95% hard block, 50–95% silent downgrade (attacker gets no feedback), 30–50% log only
+4. **Rate Limiting** — Token bucket per identity; prevent abuse
+5. **Intent Refinement** — Auto-assess risk level (low / medium / high / critical)
+6. **Rule Engine** — Hard gates (one-vote veto) + Soft scoring (5 weighted dimensions)
+7. **Verification Pipeline** — Post-execution: syntax → secret leak scan → result integrity; fail triggers rollback from pre-mutation snapshot
 
 ### Executor Safety
 
 | Executor | Protection |
 |----------|-----------|
-| File Ops | Sandbox root enforcement; path traversal blocked |
+| File Ops | Sandbox root enforcement; pre-write snapshots for rollback; path traversal blocked |
 | Shell | Binary allowlist; unknown commands rejected |
-| HTTP | Domain allowlist; internal addresses blocked |
+| HTTP | Domain allowlist; internal IP blocked (RFC1918, loopback, link-local, multicast, IPv6 private); redirect target validated on every hop |
 
 ---
 
@@ -281,16 +293,19 @@ Every tool call passes through six checkpoints:
 HiveMind/
 ├── pyproject.toml
 ├── README.md
+├── README_CN.md
 ├── .env.example
 ├── .gitignore
 ├── src/hivemind/
 │   ├── __init__.py
-│   ├── config.py              # All Pydantic configuration models
+│   ├── config.py              # All Pydantic configuration models (v2.0: +6 new classes)
 │   ├── context.py             # AppContext — runtime shared state
 │   ├── server.py              # FastMCP entry point (15 tools/resources/prompts)
 │   ├── gateway/
 │   │   ├── auth.py            # API Key authentication
-│   │   ├── injection.py       # Injection detection (command/SQL/path traversal)
+│   │   ├── injection.py       # Two-layer injection detection (v2.0 refactor)
+│   │   ├── structural_guard.py # v2.0: per-parameter slot validation
+│   │   ├── semantic_classifier.py # v2.0: confidence-based attack classification
 │   │   ├── rate_limiter.py    # Token bucket rate limiter
 │   │   └── audit.py           # Audit log (ring buffer)
 │   ├── commander/
@@ -298,31 +313,37 @@ HiveMind/
 │   │   ├── rule_engine.py     # Hard gates + soft scoring engine
 │   │   ├── arbiter.py         # Final arbitration
 │   │   ├── task_router.py     # System 1 (fast) / System 2 (full) routing
-│   │   ├── state_manager.py   # Task state machine (FSM)
-│   │   └── lifecycle.py       # Central orchestrator
+│   │   ├── state_manager.py   # Task FSM (v2.0: rollback + escalation states)
+│   │   └── lifecycle.py       # Central orchestrator (v2.0: verifier + procedural memory wired)
 │   ├── executors/
 │   │   ├── base.py            # Abstract base class
-│   │   ├── file_ops.py        # Sandboxed file read/write/delete
+│   │   ├── file_ops.py        # Sandboxed file ops (v2.0: pre-mutation snapshots)
 │   │   ├── shell_ops.py       # Allowlist-based shell execution
-│   │   └── http_ops.py        # Domain-allowlist HTTP client
+│   │   └── http_ops.py        # Domain-allowlist HTTP (v2.0: SSRF + redirect guard)
 │   ├── verification/
 │   │   ├── base.py            # Abstract base class
 │   │   ├── pipeline.py        # Pipeline orchestrator (supports fail_fast)
 │   │   ├── syntax_check.py    # JSON/YAML syntax validation
-│   │   ├── security_check.py  # API key / private key leak scanner
+│   │   ├── security_check.py  # Secret leak scanner (v2.0: +read_file +http_* output scan)
 │   │   └── result_check.py    # Exit code / integrity check
 │   ├── memory/
-│   │   ├── working.py         # Working memory (per-task isolation)
+│   │   ├── working.py         # Working memory (v2.0: max_bytes eviction)
 │   │   ├── short_term.py      # Short-term memory (TTL cache)
-│   │   └── long_term.py       # Long-term memory (JSON file persistence)
+│   │   ├── long_term.py       # Long-term memory (v2.0: atomic write)
+│   │   ├── procedural.py      # v2.0: procedural memory (env snapshots → faster with use)
+│   │   ├── consistency.py     # v2.0: cross-tier consistency manager
+│   │   └── facade.py          # v2.0: MemorySystem unified facade
 │   └── observability/
 │       ├── logger.py          # structlog / stdlib dual-mode
 │       └── metrics.py         # Counters, gauges, histograms
 └── tests/
-    ├── verify.py              # Standalone verification (51 checks)
+    ├── verify.py              # Standalone verification (79 checks)
     ├── test_rule_engine.py
-    ├── test_gateway.py
-    └── test_verification.py
+    ├── test_gateway.py        # v2.0: +structural guard +semantic classifier tests
+    ├── test_verification.py   # v2.0: +read_file +http_* output scanning tests
+    ├── test_procedural_memory.py   # v2.0
+    ├── test_memory_system.py       # v2.0
+    └── test_lifecycle_v2.py        # v2.0
 ```
 
 ---
@@ -332,7 +353,10 @@ HiveMind/
 - **Immutability** — All Pydantic models are `frozen=True`; create, never mutate
 - **Constitution as Code** — Rules via JSON config, loaded dynamically with `importlib`; extend without touching source
 - **Full Audit Trail** — Gateway → Arbiter → Executor → Verification, every step traceable
-- **System 1/2 Routing** — Cache hits + low risk take the fast path; writes + high risk go through full verification
+- **System 1/2 Routing** — Cache hits + low risk take the fast path; writes + high risk go through full verification → rollback on failure
+- **Defense in Depth** — Dual-layer injection (structural + semantic), SSRF protection, secret scanning, pre-mutation snapshots
+- **Atomic Persistence** — All file writes use `tempfile.mkstemp` + `os.replace` to prevent corruption on crash
+- **越用越快 (Faster with Use)** — Procedural memory records execution results with environment snapshots; reuses cached results only when the environment hasn't changed
 
 ---
 
@@ -348,12 +372,17 @@ You can leave it empty to skip authentication entirely. Setting it just adds an 
 
 ### Why was my command blocked?
 
-Two possible layers:
+Three possible layers:
 
-- **Hard gate** — Unconditional rejection. For example, `rm -rf /`, reading `/etc/passwd`, path traversal with `../` are always blocked.
-- **Soft scoring** — Risk-weighted. Writes and deletes score lower than reads. Below threshold, human approval is required.
+- **Structural Guard** — A parameter contained illegal characters, was too long, or had the wrong type. For example, a path containing `;` or a 300-character filename.
+- **Hard Gate** — Unconditional rejection. For example, `rm -rf /`, reading `/etc/passwd`, path traversal with `../` are always blocked.
+- **Soft Scoring** — Risk-weighted. Writes and deletes score lower than reads. Below threshold, human approval is required.
 
 If a safe operation is being falsely blocked, run `get_constitution` to see the active rules, then customize your `constitution.json`.
+
+### What happens when verification fails?
+
+The operation is rolled back — files are restored from pre-mutation snapshots (`.hivemind-bak`). The task is marked as failed. No partial or corrupted state is left behind.
 
 ### "ImportError: cannot import name ..."
 

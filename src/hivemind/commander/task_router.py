@@ -1,4 +1,7 @@
-"""Commander — task router: System 1 (fast cache) vs System 2 (full flow) dispatch."""
+"""Commander — task router: System 1 (fast cache) vs System 2 (full flow) dispatch.
+
+v2.0: Optional procedural_memory parameter for env validation before cache reuse.
+"""
 
 from __future__ import annotations
 
@@ -13,12 +16,16 @@ from hivemind.commander.arbiter import Decision
 
 
 class TaskRouter:
-    """Routes intents: System1=cached results, System2=full gateway→executor→verification."""
+    """Routes intents: System1=cached results, System2=full gateway→executor→verification.
 
-    def __init__(self, default_ttl: int = 300) -> None:
+    v2.0: Accepts optional procedural_memory reference for future env-aware caching.
+    """
+
+    def __init__(self, default_ttl: int = 300, procedural_memory: Any = None) -> None:
         self._lock = asyncio.Lock()
         self._cache: dict[str, tuple[Any, float]] = {}
         self._default_ttl = default_ttl
+        self._procedural_memory = procedural_memory  # v2.0: reserved for env-aware routing
 
     async def try_system1(self, intent: RefinedIntent, decision: Decision) -> Any | None:
         if decision.execution_mode != "system1": return None

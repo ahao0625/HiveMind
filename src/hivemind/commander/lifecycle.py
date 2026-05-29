@@ -1,5 +1,7 @@
 """Commander — task lifecycle orchestrator.
 
+v2.0: Wired VerificationPipeline, procedural memory, rollback on verify failure,
+and failure counting with auto-escalation.
 Central coordinator: Gateway → Intent → Rule Engine → Arbiter → Executor → Verification → Memory → Audit
 """
 
@@ -16,10 +18,12 @@ from hivemind.commander.arbiter import Arbiter, Decision
 from hivemind.commander.task_router import TaskRouter
 from hivemind.commander.state_manager import StateManager, TaskState
 from hivemind.gateway.auth import AuthGuard
-from hivemind.gateway.injection import InjectionDetector
+from hivemind.gateway.injection import InjectionDetector, InjectionResult
 from hivemind.gateway.rate_limiter import TokenBucketRateLimiter
 from hivemind.gateway.audit import AuditLogger, AuditEvent
+from hivemind.memory.facade import MemorySystem
 from hivemind.observability.metrics import MetricsCollector
+from hivemind.verification.pipeline import VerificationPipeline
 
 
 class ToolResult:
@@ -34,12 +38,17 @@ class ToolResult:
 
 
 class TaskLifecycle:
-    """Orchestrates the full tool-call lifecycle."""
+    """Orchestrates the full tool-call lifecycle.
+
+    v2.0: Verification pipeline runs after execution; procedural memory
+    records successes and validates environment before system1 cache reuse.
+    """
 
     def __init__(self, config: HiveMindConfig, auth: AuthGuard, injection: InjectionDetector,
                  rate_limiter: TokenBucketRateLimiter, audit: AuditLogger, metrics: MetricsCollector,
                  rule_engine: RuleEngine, arbiter: Arbiter, router: TaskRouter,
-                 state_manager: StateManager, memory_system: Any) -> None:
+                 state_manager: StateManager, memory_system: MemorySystem,
+                 verifier: VerificationPipeline | None = None) -> None:
         self._config = config
         self._auth = auth
         self._injection = injection
@@ -52,6 +61,7 @@ class TaskLifecycle:
         self._router = router
         self._state_manager = state_manager
         self._memory = memory_system
+        self._verifier = verifier
         self._executors: dict[str, Any] = {}
 
     def register_executor(self, tool_name: str, executor: Any) -> None:
@@ -64,25 +74,37 @@ class TaskLifecycle:
         await self._metrics.increment("hivemind_requests_total")
         await self._metrics.gauge("hivemind_active_tasks", await self._state_manager.active_count())
 
-        # ── 1. GATEWAY ──
+        # ── 1. GATEWAY: Auth ──
         auth_result = self._auth.authenticate(api_key)
         if not auth_result.authenticated:
             await self._record_audit(identity, tool_name, params, "blocked", "blocked", "skipped", "skipped",
                                      f"Auth: {auth_result.reason}")
             return ToolResult(False, blocked=True, reason=f"Auth: {auth_result.reason}")
 
+        # ── 1. GATEWAY: Rate Limit ──
         if not await self._rate_limiter.consume(identity):
             await self._record_audit(identity, tool_name, params, "blocked", "blocked", "skipped", "skipped",
                                      "Rate limit exceeded")
             return ToolResult(False, blocked=True, reason="Rate limit exceeded")
 
-        injection_results = self._injection.check_all(tool_name, params)
-        blocked_inj = [r for r in injection_results if not r.passed]
-        if blocked_inj:
+        # ── 1. GATEWAY: Injection (v2.0: InjectionResult) ──
+        inj_result: InjectionResult = self._injection.check_all(tool_name, params)
+        if inj_result.blocked:
             await self._metrics.increment("hivemind_gate_blocks_total")
+            reason = "Injection detected"
+            if inj_result.legacy_results:
+                reason = inj_result.legacy_results[0].reason
+            elif inj_result.structural and inj_result.structural.blocked_params:
+                reason = f"Structural block: {inj_result.structural.blocked_params}"
+            elif inj_result.semantic and inj_result.semantic.has_blocks:
+                reason = "Semantic block"
             await self._record_audit(identity, tool_name, params, "blocked", "blocked", "skipped", "skipped",
-                                     f"Injection: {blocked_inj[0].reason}")
-            return ToolResult(False, blocked=True, reason=f"Injection detected: {blocked_inj[0].reason}")
+                                     f"Injection: {reason}")
+            return ToolResult(False, blocked=True, reason=f"Injection: {reason}")
+
+        # Apply silent downgrades from semantic classifier
+        if inj_result.downgraded_params:
+            params = {**params, **inj_result.downgraded_params}
 
         await self._state_manager.transition(task.task_id, TaskState.PLANNING)
 
@@ -105,13 +127,18 @@ class TaskLifecycle:
                                      f"Arbiter: {decision.reasoning}")
             return ToolResult(False, blocked=True, reason=decision.reasoning)
 
-        # ── 5. SYSTEM 1 FAST PATH ──
+        # ── 5. SYSTEM 1 FAST PATH (v2.0: env validation) ──
         if decision.execution_mode == "system1":
-            cached = await self._router.try_system1(intent, decision)
-            if cached is not None:
-                await self._metrics.increment("hivemind_system1_hits_total")
-                await self._state_manager.transition(task.task_id, TaskState.COMPLETED)
-                return ToolResult(True, data=cached)
+            # v2.0: validate environment before reusing cached result
+            params_tuple = tuple(sorted(params.items()))
+            is_valid, _reason = self._memory.validate_procedural(tool_name, params_tuple)
+            if is_valid:
+                cached = await self._router.try_system1(intent, decision)
+                if cached is not None:
+                    await self._metrics.increment("hivemind_system1_hits_total")
+                    await self._state_manager.transition(task.task_id, TaskState.COMPLETED)
+                    return ToolResult(True, data=cached)
+            # env mismatch → fall through to system2
 
         await self._state_manager.transition(task.task_id, TaskState.EXECUTING)
         await self._metrics.increment("hivemind_system2_hits_total")
@@ -125,25 +152,55 @@ class TaskLifecycle:
         try:
             exec_result = await executor.execute(intent)
         except Exception as exc:
+            await self._state_manager.record_failure(task.task_id)
             await self._state_manager.transition(task.task_id, TaskState.FAILED, error=str(exc))
             await self._record_audit(identity, tool_name, params, "passed", "approved", "failure", "skipped", str(exc))
             return ToolResult(False, blocked=True, reason=f"Execution error: {exc}")
 
         if not exec_result.success:
             err = getattr(exec_result, 'error', 'unknown')
+            await self._state_manager.record_failure(task.task_id)
             await self._state_manager.transition(task.task_id, TaskState.FAILED, error=err)
             await self._record_audit(identity, tool_name, params, "passed", "approved", "failure", "skipped", err)
             return ToolResult(False, blocked=True, reason=f"Execution failed: {err}")
 
         await self._metrics.increment("hivemind_executions_total")
 
-        # ── 7. VERIFICATION (System 2) ──
+        # ── 7. VERIFICATION (v2.0: actually run the pipeline) ──
         await self._state_manager.transition(task.task_id, TaskState.VERIFYING)
 
-        # ── 8. CACHE ──
+        if self._verifier is not None:
+            verify_result = await self._verifier.verify(tool_name, exec_result, params)
+            if not verify_result.passed:
+                # v2.0: rollback on verification failure
+                await self._state_manager.record_failure(task.task_id)
+                await self._state_manager.rollback(task.task_id)
+                # trigger file restore if applicable
+                if hasattr(executor, 'restore_from_snapshot'):
+                    executor.restore_from_snapshot(params.get("path", ""))
+                await self._state_manager.transition(task.task_id, TaskState.FAILED,
+                                                     error=f"Verification failed: {verify_result.summary()}")
+                await self._record_audit(identity, tool_name, params, "passed", "approved", "success", "failed",
+                                         f"Verification failed: {verify_result.summary()}")
+                return ToolResult(False, blocked=True, reason=f"Verification failed: {verify_result.summary()}")
+            # v2.0: verification passed → cleanup snapshots
+            if hasattr(executor, 'cleanup_snapshot'):
+                executor.cleanup_snapshot(params.get("path", ""))
+
+        # ── 8. PROCEDURAL MEMORY (v2.0: record successful execution) ──
+        params_tuple = tuple(sorted(params.items()))
+        result_data = getattr(exec_result, 'output', '') or ''
+        if isinstance(result_data, bytes):
+            result_data = result_data.decode('utf-8', errors='replace')
+        self._memory.record_procedural(
+            tool_name, params_tuple, str(result_data),
+            success=True, latency_ms=getattr(exec_result, 'duration_ms', 0.0),
+        )
+
+        # ── 9. CACHE ──
         await self._router.cache_result(intent, exec_result)
 
-        # ── 9. AUDIT ──
+        # ── 10. AUDIT ──
         duration_ms = (time.monotonic() - t_start) * 1000
         await self._record_audit(identity, tool_name, params, "passed", "approved", "success", "passed",
                                  f"OK {duration_ms:.0f}ms score={rule_result.overall_score:.2f}",

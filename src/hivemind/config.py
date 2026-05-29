@@ -23,6 +23,35 @@ class RateLimitConfig(BaseModel):
     burst_size: int = 20
 
 
+class ParameterSlotConfig(BaseModel):
+    """v2.0: per-parameter slot definition for structural injection guard."""
+    param_name: str = "*"  # "*" = default catch-all slot
+    allowed_chars: str = r"[\w\s\-_./]+"  # regex character class
+    max_length: int = 4096
+    type_constraint: str = "str"  # str | int | float | json
+
+
+class ToolSlotConfig(BaseModel):
+    """v2.0: per-tool structural slot configuration."""
+    tool_name: str
+    slots: list[ParameterSlotConfig] = Field(default_factory=list)
+
+
+class InjectionStructuralConfig(BaseModel):
+    """v2.0 structural injection guard config — slot-based param validation."""
+    enabled: bool = True
+    per_tool_slots: list[ToolSlotConfig] = Field(default_factory=list)
+    default_slot: ParameterSlotConfig = Field(default_factory=ParameterSlotConfig)
+
+
+class InjectionSemanticConfig(BaseModel):
+    """v2.0 semantic classifier config — confidence-based downgrade/block."""
+    enabled: bool = True
+    block_confidence: float = 0.95  # ≥95% → hard block
+    downgrade_confidence: float = 0.50  # 50-95% → silent downgrade
+    log_confidence: float = 0.30  # 30-50% → log only
+
+
 class InjectionConfig(BaseModel):
     enabled: bool = True
     banned_commands: list[str] = Field(default_factory=lambda: [
@@ -36,6 +65,8 @@ class InjectionConfig(BaseModel):
         r"(?i)\bDROP\s+TABLE\b", r"(?i)\bDROP\s+DATABASE\b",
         r"(?i)\bALTER\s+TABLE\b.*\bDROP\b", r"(?i)\bTRUNCATE\b",
     ])
+    structural: InjectionStructuralConfig = Field(default_factory=InjectionStructuralConfig)
+    semantic: InjectionSemanticConfig = Field(default_factory=InjectionSemanticConfig)
 
 
 class GatewayConfig(BaseModel):
@@ -71,10 +102,19 @@ class Constitution(BaseModel):
     human_approval_threshold: float = 0.60
 
 
+class LifecycleConfig(BaseModel):
+    """v2.0: lifecycle orchestration config — retries, rollback, escalation."""
+    max_retries: int = 3
+    escalation_threshold: int = 3  # failures before auto-escalation
+    rollback_enabled: bool = True
+    checkpoint_enabled: bool = True
+
+
 class CommanderConfig(BaseModel):
     constitution: Constitution = Field(default_factory=Constitution)
     default_routing: Literal["system1", "system2"] = "system2"
     max_retries: int = 3
+    lifecycle: LifecycleConfig = Field(default_factory=LifecycleConfig)
 
 
 # ── Executors ────────────────────────────────────────────────────
@@ -141,10 +181,20 @@ class WorkingMemoryConfig(BaseModel):
     max_bytes: int = 10 * 1024 * 1024  # 10 MB
 
 
+class ProceduralMemoryConfig(BaseModel):
+    """v2.0: procedural memory with env snapshots for '越用越快' caching."""
+    max_records: int = 500
+    env_tolerance: int = 2  # number of env fields that can differ before invalidation
+    persistence_path: str = "~/.hivemind/procedural_memory.json"
+    promote_after: int = 3  # successes before promoting to system1 cache
+    max_failures_before_demote: int = 2
+
+
 class MemoryConfig(BaseModel):
     short_term: ShortTermMemoryConfig = Field(default_factory=ShortTermMemoryConfig)
     long_term: LongTermMemoryConfig = Field(default_factory=LongTermMemoryConfig)
     working: WorkingMemoryConfig = Field(default_factory=WorkingMemoryConfig)
+    procedural: ProceduralMemoryConfig = Field(default_factory=ProceduralMemoryConfig)
 
 
 # ── Server ───────────────────────────────────────────────────────
