@@ -11,6 +11,12 @@ class PipelineResult(BaseModel):
     results: list[VerifyResult] = Field(default_factory=list)
     combined_score: float = 1.0
 
+    def summary(self) -> str:
+        if self.all_passed:
+            return "all passed"
+        failed = [r.reason for r in self.results if not r.passed]
+        return "; ".join(failed) if failed else "verification failed"
+
 
 class VerificationPipeline:
     def __init__(self, verifiers: list[Verifier], fail_fast: bool = True) -> None:

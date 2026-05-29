@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "hivemind": {
+      "command": "python3",
+      "args": ["-m", "hivemind.server"],
+      "env": {
+        "PYTHONPATH": "/Users/ahao/Downloads/HiveMind/src",
+        "HIVEMIND_API_KEYS": ""
+      },
+      "cwd": "/Users/ahao/Downloads/HiveMind"
+    }
+  }
+}

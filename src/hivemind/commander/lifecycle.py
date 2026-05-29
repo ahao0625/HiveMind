@@ -170,8 +170,8 @@ class TaskLifecycle:
         await self._state_manager.transition(task.task_id, TaskState.VERIFYING)
 
         if self._verifier is not None:
-            verify_result = await self._verifier.verify(tool_name, exec_result, params)
-            if not verify_result.passed:
+            verify_result = await self._verifier.verify(intent, exec_result)
+            if not verify_result.all_passed:
                 # v2.0: rollback on verification failure
                 await self._state_manager.record_failure(task.task_id)
                 await self._state_manager.rollback(task.task_id)
