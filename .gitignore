@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+.venv/
+venv/
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# HiveMind runtime
+~/.hivemind/
+
+# Design docs (not part of distribution)
+HiveMind*.docx
+HiveMind*.txt
+test_hivemind_demo.py
