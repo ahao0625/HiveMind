@@ -61,30 +61,30 @@ def lifecycle(config, sandbox):
 class TestBasicExecution:
     @pytest.mark.asyncio
     async def test_write_then_read(self, lifecycle, sandbox):
-        r = await lifecycle.execute("write_file", {"path": "hello.txt", "content": "world"}, identity="test")
+        r = await lifecycle.execute("write_file", {"path": "hello.txt", "content": "world"}, identity="test", api_key="hivemind-dev-key")
         assert r.success is True
         assert r.blocked is False
 
-        r2 = await lifecycle.execute("read_file", {"path": "hello.txt"}, identity="test")
+        r2 = await lifecycle.execute("read_file", {"path": "hello.txt"}, identity="test", api_key="hivemind-dev-key")
         assert r2.success is True
         assert "world" in str(r2.data.output)
 
     @pytest.mark.asyncio
     async def test_safe_read_not_blocked(self, lifecycle):
-        r = await lifecycle.execute("read_file", {"path": "test.txt"}, identity="test")
+        r = await lifecycle.execute("read_file", {"path": "test.txt"}, identity="test", api_key="hivemind-dev-key")
         # file may not exist but should not be blocked by gateway
         assert r.blocked is False or "File not found" in str(r.reason)
 
     @pytest.mark.asyncio
     async def test_destructive_blocked(self, lifecycle):
-        r = await lifecycle.execute("run_command", {"command": "rm -rf /"}, identity="test")
+        r = await lifecycle.execute("run_command", {"command": "rm -rf /"}, identity="test", api_key="hivemind-dev-key")
         assert r.blocked is True
 
 
 class TestVerificationPipeline:
     @pytest.mark.asyncio
     async def test_invalid_json_triggers_verification_failure(self, lifecycle):
-        r = await lifecycle.execute("write_file", {"path": "bad.json", "content": "{invalid}"}, identity="test")
+        r = await lifecycle.execute("write_file", {"path": "bad.json", "content": "{invalid}"}, identity="test", api_key="hivemind-dev-key")
         # should be blocked by verification (syntax check fails)
         assert "Verification failed" in r.reason
 
@@ -92,7 +92,7 @@ class TestVerificationPipeline:
 class TestProceduralMemoryRecording:
     @pytest.mark.asyncio
     async def test_success_records_procedural_memory(self, lifecycle):
-        r = await lifecycle.execute("write_file", {"path": "proc.txt", "content": "hello"}, identity="test")
+        r = await lifecycle.execute("write_file", {"path": "proc.txt", "content": "hello"}, identity="test", api_key="hivemind-dev-key")
         assert r.success is True
         # procedural memory should have recorded this
         # verify via the memory system

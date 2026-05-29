@@ -120,16 +120,31 @@ class ProceduralMemory:
         env = self.snapshot_environment()
         result_hash = _hash_str(result_data)
 
-        record = GameRecord(
-            key=key,
-            tool_name=tool_name,
-            params_hash=params_hash,
-            env_snapshot=env,
-            result_hash=result_hash,
-            success=success,
-            latency_ms=latency_ms,
-            use_count=1,
-        )
+        existing = self._records.get(key)
+        if existing is not None:
+            record = GameRecord(
+                key=key,
+                tool_name=tool_name,
+                params_hash=params_hash,
+                env_snapshot=env,
+                result_hash=result_hash,
+                success=success,
+                latency_ms=latency_ms,
+                use_count=existing.use_count + 1,
+                created_at=existing.created_at,
+                updated_at=datetime.now(timezone.utc).isoformat(),
+            )
+        else:
+            record = GameRecord(
+                key=key,
+                tool_name=tool_name,
+                params_hash=params_hash,
+                env_snapshot=env,
+                result_hash=result_hash,
+                success=success,
+                latency_ms=latency_ms,
+                use_count=1,
+            )
 
         self._records[key] = record
         self._evict_if_needed()
