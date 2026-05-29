@@ -3,114 +3,114 @@
 [![Python](https://img.shields.io/badge/python-3.12%2B-blue)](https://python.org)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![MCP](https://img.shields.io/badge/MCP-1.12%2B-purple)](https://modelcontextprotocol.io)
-[English](README.md) | [中文](README_CN.md)
+[中文](README.md) | [English](README_EN.md)
 
-**External Commander Framework** — AI thinks. The framework decides.
+**外置指挥官框架** — AI 负责思考，框架负责把关。
 
-## What Is This?
+## 这是什么？
 
-Every time AI runs a command or touches a file, you're gambling. Stuffing "never do X" into the prompt doesn't help — it forgets, and your tokens go up in smoke.
+每次让 AI 帮你跑个命令、读个文件，你都在赌它不会乱来。你再怎么往 Prompt 里塞「不准」「禁止」也没用——它不仅记不住，Token 还被吃光了。
 
-HiveMind does one thing: **AI thinks. The framework decides.** What's allowed, what's not, and whether the result checks out — all enforced outside the prompt. Operations you approve once shortcut forever after. Doesn't eat your tokens. Gets faster the more you use it.
+HiveMind 做一件事：**AI 负责思考，框架负责把关。** 能做什么、不能做什么、做完合不合格，全由外部规则引擎说了算。你点过头的操作记住，下次直接过。不占 Prompt，越用越快。
 
-## What It Can Do
+## 能做到什么？
 
-- 🛡️ **Two-layer injection defense** — Structural guard validates each parameter's characters, type, and length; Semantic classifier blocks known attacks (≥95% confidence) and silently downgrades suspicious input (50–95%)
-- 📊 **Smart scoring** — Read files pass automatically; writes get checked; deletes require strict approval
-- 🔍 **Post-execution verification** — Syntax check, secret leak scan (API keys, JWTs, private keys), result integrity — with automatic rollback on failure
-- ⚡ **System 1/2 routing** — Read-only ops take the fast path (<10ms); writes go through full security → execute → verify → record
-- 🧠 **Four-tier memory** — Working (per-task), Short-term (TTL), Long-term (JSON), Procedural (env snapshots for "faster with use")
-- 🔄 **Rollback on failure** — Pre-write snapshots; verification fails → file restored automatically
-- 🌐 **SSRF protection** — Internal IP blocking (RFC1918, loopback, multicast) + redirect guard on every hop
-- 📝 **Full audit trail** — Who did what, when, which layer blocked it, what the final score was — all traceable
+- 🛡️ **双层注入防御** — 结构层：逐参数校验字符、类型、长度，零误报；语义层：置信度分级（≥95% 硬阻止 / 50-95% 静默降级 / 30-50% 仅日志），攻击者无反馈
+- 📊 **智能评分放行** — 读文件自动通过，写文件看情况，删文件严格审批
+- 🔍 **事后验证 + 自动回滚** — 执行后校验语法、密钥泄露、结果完整性；验证失败自动从写前快照恢复
+- ⚡ **系统 1/2 分流** — 纯读操作走快通道（<10ms），写操作走完整安全 → 执行 → 验证 → 记录流程
+- 🧠 **四层记忆** — 工作记忆（单任务隔离）、短期记忆（TTL 缓存）、长期记忆（JSON 持久化）、程序性记忆（环境快照，越用越快）
+- 🔄 **失败自动回滚** — 写前自动快照；验证不通过 → 文件自动恢复原状
+- 🌐 **SSRF 防护** — 内网 IP 阻止（RFC1918、回环、链路本地、组播、IPv6 私网）+ 重定向逐跳校验
+- 📝 **全链路审计** — 谁在什么时候做了什么、被哪层拦截的、最终评分多少，全可追溯
 
-**In one sentence: Let AI help you, but don't let it run wild.**
+**一句话：让 AI 帮你做事，但别让它乱来。**
 
 ---
 
-## Architecture
+## 架构
 
 ```
 MCP Client (Claude / Cursor / ...)
         │
         ▼
-┌─ Gateway ───────────────────────────────────────────────────┐
-│  Auth → Structural Guard (per-param slots)                  │
-│       → Semantic Classifier (confidence: block/downgrade/log)│
-│       → Token Bucket Rate Limiter                           │
+┌─ 网关 Gateway ────────────────────────────────────────────────┐
+│  认证 → 结构哨兵(逐参数字符/类型/长度)                          │
+│       → 语义分类器(置信度：阻止/静默降级/日志)                   │
+│       → 令牌桶限流                                            │
 └──────────────────────┬───────────────────────────────────────┘
                        ▼
-┌─ Commander ─────────────────────────────────────────────────┐
-│  Intent Refinement → Rule Engine → Arbiter → Task Router    │
-│                                                             │
-│  Hard Gates: one-vote veto   Soft Scoring: weighted sum     │
-│  System 1 (cached → verify env → fast path)                 │
-│  System 2 (execute → verify pipeline → record → audit)     │
+┌─ 指挥官 Commander ────────────────────────────────────────────┐
+│  意图精炼 → 规则引擎 → 仲裁 → 任务路由                          │
+│                                                              │
+│  硬性门控: 一票否决   软性评分: 五维度加权                       │
+│  系统1 (缓存命中 → 环境校验 → 快通道)                           │
+│  系统2 (执行 → 验证管线 → 记录 → 审计)                         │
 └──────────────────────┬───────────────────────────────────────┘
                        ▼
-┌─ Executor ──────────────────────────────────────────────────┐
-│  File (sandbox + pre-mutation snapshots)                    │
-│  Shell (binary allowlist)                                   │
-│  HTTP (domain allowlist + SSRF + redirect guard)            │
+┌─ 执行器 Executor ─────────────────────────────────────────────┐
+│  文件 (沙箱 + 写前快照)                                       │
+│  Shell (二进制白名单)                                         │
+│  HTTP (域名白名单 + 内网IP阻止 + 重定向校验)                    │
 └──────────────────────┬───────────────────────────────────────┘
                        ▼
-┌─ Verification Pipeline ─────────────────────────────────────┐
-│  Syntax → Security (secret leak scan) → Result integrity    │
-│  ┌─ Fail → rollback (restore from snapshot)                │
-│  └─ Pass → cleanup snapshot + record procedural memory     │
+┌─ 验证管线 Verification Pipeline ──────────────────────────────┐
+│  语法校验 → 安全规则(密钥泄露扫描) → 结果完整性                  │
+│  ┌─ 失败 → 回滚(从快照恢复)                                   │
+│  └─ 通过 → 清理快照 + 记录程序性记忆                           │
 └──────────────────────┬───────────────────────────────────────┘
                        ▼
-┌─ Memory (4 tiers) ──────────────────────────────────────────┐
-│  Working (task) / Short-term (TTL) / Long-term (JSON)       │
-│  Procedural (env snapshots → faster with use)               │
-└─────────────────────────────────────────────────────────────┘
+┌─ 记忆系统 Memory (4层) ───────────────────────────────────────┐
+│  工作记忆(单任务) / 短期记忆(TTL) / 长期记忆(JSON)              │
+│  程序性记忆(环境快照 → 越用越快)                               │
+└──────────────────────────────────────────────────────────────┘
 ```
 
-### Dual-Layer Rule Engine
+### 双层规则引擎
 
-| Layer | Mechanism | Behavior | Example |
-|-------|-----------|----------|---------|
-| **Hard Gates** | One-vote veto | Any rule fails → rejected immediately | No `rm -rf /`, no reading `/etc/passwd` |
-| **Soft Scoring** | Weighted sum (5 dimensions) | ≥0.40 auto-approve / 0.40–0.70 human review / <0.30 reject | Read scores high, write lower, delete lowest |
+| 层级 | 机制 | 判定 | 举例 |
+|------|------|------|------|
+| **硬性门控** | 一票否决 | 任一规则不通过 → 立即拒绝 | 禁止 `rm -rf /`、禁止读取 `/etc/passwd` |
+| **软性评分** | 加权求和（5 维度） | ≥0.40 自动通过 / 0.40-0.70 需审批 / <0.30 拒绝 | 读操作分高、写操作分低、删操作分最低 |
 
-### Two-Layer Injection Detection
+### 双层注入检测
 
-| Layer | Type | Mechanism | False Positives |
-|-------|------|-----------|-----------------|
-| **Structural Guard** | Deterministic | Per-parameter slot: character allowlist, type constraint, max length | Zero |
-| **Semantic Classifier** | Confidence-based | ≥95% → hard block / 50–95% → silent downgrade / 30–50% → log only | Near-zero |
+| 层级 | 类型 | 机制 | 误报率 |
+|------|------|------|--------|
+| **结构哨兵** | 确定性 | 逐参数分槽校验：字符白名单、类型约束、最大长度 | 零 |
+| **语义分类器** | 置信度分级 | ≥95% → 硬阻止 / 50-95% → 静默降级（清洗参数）/ 30-50% → 仅日志 | 极低 |
 
 ---
 
-## Quick Start
+## 快速开始
 
-### Install
+### 安装
 
 ```bash
-# Recommended: use venv to avoid macOS PEP 668 restrictions
+# 推荐：venv 安装，避免 macOS PEP 668 限制
 python3 -m venv .venv && source .venv/bin/activate
 pip install git+https://github.com/ahao0625/HiveMind.git
 
-# Or clone + dev install
+# 或者克隆后开发模式安装
 git clone https://github.com/ahao0625/HiveMind.git
 cd HiveMind
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
-> `structlog` is optional — falls back to stdlib `logging` automatically.
+> `structlog` 为可选依赖，未安装时自动退回到 stdlib logging。
 
-### Run
+### 启动
 
 ```bash
 hivemind
 ```
 
-### Verify
+### 验证
 
 ```bash
 PYTHONPATH=src python3 tests/verify.py
-# Expected: Results: 79/79 passed, 0 failed
+# 预期输出: Results: 79/79 passed, 0 failed
 ```
 
 ```bash
@@ -119,9 +119,9 @@ pytest tests/ -v
 
 ---
 
-## MCP Client Config
+## MCP 客户端配置
 
-### Option 1: After pip install (recommended)
+### 方式一：pip 安装后（推荐）
 
 ```json
 {
@@ -136,7 +136,7 @@ pytest tests/ -v
 }
 ```
 
-### Option 2: Dev mode
+### 方式二：开发模式
 
 ```json
 {
@@ -156,27 +156,27 @@ pytest tests/ -v
 
 ---
 
-## Configuration
+## 配置参考
 
-### Environment Variables
+### 环境变量
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `HIVEMIND_API_KEYS` | Comma-separated API keys; empty = no auth | `""` |
-| `JSON_LOG` | Set to `1` for JSON-formatted logs (production) | off |
-| `HIVEMIND_CONSTITUTION_PATH` | Custom rule set config file path | `~/.hivemind/constitution.json` |
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `HIVEMIND_API_KEYS` | 逗号分隔的 API Key 列表，为空则不认证 | `""` |
+| `JSON_LOG` | 设为 `1` 输出 JSON 格式日志（生产环境） | 关闭 |
+| `HIVEMIND_CONSTITUTION_PATH` | 自定义规则集配置文件路径 | `~/.hivemind/constitution.json` |
 
-### Constitution File (constitution.json)
+### 宪法规则文件（constitution.json）
 
-Set `HIVEMIND_CONSTITUTION_PATH` to point to a custom rule set:
+可通过 `HIVEMIND_CONSTITUTION_PATH` 指定自定义规则集：
 
 ```json
 {
   "hard_gates": [
     {
       "id": "no_destructive_commands",
-      "name": "No Destructive Commands",
-      "description": "Blocks rm -rf, format, etc.",
+      "name": "禁止破坏性命令",
+      "description": "阻止 rm -rf、format 等操作",
       "priority": 100,
       "check_function": "hivemind.commander.rule_engine:check_no_destructive_commands"
     }
@@ -184,8 +184,8 @@ Set `HIVEMIND_CONSTITUTION_PATH` to point to a custom rule set:
   "scoring_dimensions": [
     {
       "id": "safety",
-      "name": "Safety",
-      "description": "How safe is this operation?",
+      "name": "安全性",
+      "description": "操作的安全程度",
       "weight": 0.40,
       "score_function": "hivemind.commander.rule_engine:score_safety"
     }
@@ -195,97 +195,97 @@ Set `HIVEMIND_CONSTITUTION_PATH` to point to a custom rule set:
 }
 ```
 
-> `check_function` / `score_function` are loaded dynamically via `importlib`, so you can extend without modifying source code.
+> `check_function` / `score_function` 通过 `importlib` 动态加载，支持自定义扩展。
 
 ---
 
-## API Reference
+## API 参考
 
-### Tools
+### 工具
 
-#### File Operations
+#### 文件操作
 
-| Tool | Parameters | Returns |
-|------|-----------|---------|
-| `read_file` | `path: str` | File contents |
-| `write_file` | `path: str`, `content: str` | `[OK]` or `[VERIFICATION FAILED]` |
+| 工具 | 参数 | 返回 |
+|------|------|------|
+| `read_file` | `path: str` | 文件内容 |
+| `write_file` | `path: str`, `content: str` | `[OK]` 或 `[VERIFICATION FAILED]` |
 | `delete_file` | `path: str` | `[OK]` |
-| `list_files` | `path: str` (default `"."`) | Directory listing |
+| `list_files` | `path: str` (默认 `"."`) | 文件列表 |
 
 #### Shell
 
-| Tool | Parameters | Returns |
-|------|-----------|---------|
-| `run_command` | `command: str`, `cwd: str?` | stdout + verification warnings |
+| 工具 | 参数 | 返回 |
+|------|------|------|
+| `run_command` | `command: str`, `cwd: str?` | stdout + 验证警告 |
 
-> Shell execution is protected by a binary allowlist — only safe commands can run.
+> Shell 执行受二进制白名单保护，只允许安全命令。
 
 #### HTTP
 
-| Tool | Parameters |
-|------|-----------|
+| 工具 | 参数 |
+|------|------|
 | `http_get` | `url: str` |
 | `http_post` | `url: str`, `body: str`, `content_type: str` |
 | `http_put` | `url: str`, `body: str`, `content_type: str` |
 | `http_delete` | `url: str` |
 
-> HTTP requests are protected by domain allowlist, internal IP blocking (SSRF), and redirect guard.
+> HTTP 请求受域名白名单保护，阻止内网 IP（防 SSRF），重定向逐跳校验。
 
-#### Memory
+#### 记忆
 
-| Tool | Parameters | Description |
-|------|-----------|-------------|
-| `store_memory` | `key: str`, `value: str` | Save to long-term memory |
-| `recall_memory` | `query: str`, `limit: int` | Search memory (short-term + long-term) |
+| 工具 | 参数 | 说明 |
+|------|------|------|
+| `store_memory` | `key: str`, `value: str` | 存入长期记忆 |
+| `recall_memory` | `query: str`, `limit: int` | 搜索记忆（短期+长期） |
 
-#### Observability
+#### 可观测性
 
-| Tool | Description |
-|------|------------|
-| `get_constitution` | View the active rule set |
-| `get_audit_trail` | View the last 50 audit records |
-| `get_metrics` | View counters, gauges, latency histograms |
+| 工具 | 说明 |
+|------|------|
+| `get_constitution` | 查看当前生效的规则集 |
+| `get_audit_trail` | 查看最近 50 条审计记录 |
+| `get_metrics` | 查看计数器/延迟等指标 |
 
-### Resources
+### 资源
 
-| URI | Content |
-|-----|---------|
-| `hivemind://constitution` | Current rule set as JSON |
-| `hivemind://status` | Server health status |
+| URI | 内容 |
+|-----|------|
+| `hivemind://constitution` | 当前规则集 JSON |
+| `hivemind://status` | 服务器状态 |
 
-### Prompts
+### 提示
 
-| Prompt | Purpose |
-|--------|---------|
-| `plan_task` | Guide AI through task planning |
-| `review_result` | Guide AI through result review |
-| `troubleshoot` | Guide AI through error diagnosis |
-
----
-
-## Security Model
-
-Every tool call passes through seven checkpoints:
-
-1. **Authentication** — API Key validation; reject unauthenticated requests
-2. **Structural Guard** — Per-parameter slot validation (character allowlist, type constraints, length limits); deterministic, zero false positives
-3. **Semantic Classifier** — Confidence-based attack detection: ≥95% hard block, 50–95% silent downgrade (attacker gets no feedback), 30–50% log only
-4. **Rate Limiting** — Token bucket per identity; prevent abuse
-5. **Intent Refinement** — Auto-assess risk level (low / medium / high / critical)
-6. **Rule Engine** — Hard gates (one-vote veto) + Soft scoring (5 weighted dimensions)
-7. **Verification Pipeline** — Post-execution: syntax → secret leak scan → result integrity; fail triggers rollback from pre-mutation snapshot
-
-### Executor Safety
-
-| Executor | Protection |
-|----------|-----------|
-| File Ops | Sandbox root enforcement; pre-write snapshots for rollback; path traversal blocked |
-| Shell | Binary allowlist; unknown commands rejected |
-| HTTP | Domain allowlist; internal IP blocked (RFC1918, loopback, link-local, multicast, IPv6 private); redirect target validated on every hop |
+| 提示 | 用途 |
+|------|------|
+| `plan_task` | 引导 AI 规划任务步骤 |
+| `review_result` | 引导 AI 审查执行结果 |
+| `troubleshoot` | 引导 AI 排查错误 |
 
 ---
 
-## Project Structure
+## 安全模型
+
+每一笔工具调用经过七道关卡：
+
+1. **认证** — API Key 校验，拒绝未授权请求
+2. **结构哨兵** — 逐参数分槽校验：字符白名单、类型约束、长度限制；确定性检测，零误报
+3. **语义分类器** — 置信度分级：≥95% 硬阻止 / 50-95% 静默降级（攻击者无反馈）/ 30-50% 仅日志
+4. **令牌桶限流** — 每身份独立桶，防止滥用
+5. **意图精炼** — 自动评估风险等级（low / medium / high / critical）
+6. **规则引擎** — 硬性门控（一票否决）+ 软性评分（五维度加权）
+7. **验证管线** — 执行后校验：语法格式 → 密钥泄露扫描 → 结果完整性；失败则从写前快照回滚
+
+### 执行器安全
+
+| 执行器 | 保护措施 |
+|--------|----------|
+| 文件操作 | 沙箱根目录限制；写前自动快照（验证失败可回滚）；路径遍历阻止 |
+| Shell 命令 | 二进制白名单，未知命令拒绝执行 |
+| HTTP 请求 | 域名白名单；内网 IP 阻止（RFC1918、回环、链路本地、组播、IPv6 私网）；重定向逐跳校验目标 |
+
+---
+
+## 项目结构
 
 ```
 HiveMind/
@@ -296,49 +296,49 @@ HiveMind/
 ├── .gitignore
 ├── src/hivemind/
 │   ├── __init__.py
-│   ├── config.py              # All Pydantic configuration models (v2.0: +6 new classes)
-│   ├── context.py             # AppContext — runtime shared state
-│   ├── server.py              # FastMCP entry point (15 tools/resources/prompts)
+│   ├── config.py              # 所有 Pydantic 配置模型（v2.0: +6 个新类）
+│   ├── context.py             # AppContext 运行时状态
+│   ├── server.py              # FastMCP 入口（15 个工具/资源/提示）
 │   ├── gateway/
-│   │   ├── auth.py            # API Key authentication
-│   │   ├── injection.py       # Two-layer injection detection (v2.0 refactor)
-│   │   ├── structural_guard.py # v2.0: per-parameter slot validation
-│   │   ├── semantic_classifier.py # v2.0: confidence-based attack classification
-│   │   ├── rate_limiter.py    # Token bucket rate limiter
-│   │   └── audit.py           # Audit log (ring buffer)
+│   │   ├── auth.py            # API Key 认证
+│   │   ├── injection.py       # 双层注入检测（v2.0 重构）
+│   │   ├── structural_guard.py # v2.0: 逐参数分槽校验
+│   │   ├── semantic_classifier.py # v2.0: 置信度攻击分类
+│   │   ├── rate_limiter.py    # 令牌桶限流
+│   │   └── audit.py           # 审计日志（环形缓冲区）
 │   ├── commander/
-│   │   ├── intent_refiner.py  # Intent refinement + risk classification
-│   │   ├── rule_engine.py     # Hard gates + soft scoring engine
-│   │   ├── arbiter.py         # Final arbitration
-│   │   ├── task_router.py     # System 1 (fast) / System 2 (full) routing
-│   │   ├── state_manager.py   # Task FSM (v2.0: rollback + escalation states)
-│   │   └── lifecycle.py       # Central orchestrator (v2.0: verifier + procedural memory wired)
+│   │   ├── intent_refiner.py  # 意图精炼 + 风险分级
+│   │   ├── rule_engine.py     # 硬门控 + 软评分引擎
+│   │   ├── arbiter.py         # 最终仲裁决策
+│   │   ├── task_router.py     # 系统1(快)/系统2(慢) 分流
+│   │   ├── state_manager.py   # 任务状态机（v2.0: +回滚+升级状态）
+│   │   └── lifecycle.py       # 核心编排器（v2.0: 验证管线+程序性记忆已接入）
 │   ├── executors/
-│   │   ├── base.py            # Abstract base class
-│   │   ├── file_ops.py        # Sandboxed file ops (v2.0: pre-mutation snapshots)
-│   │   ├── shell_ops.py       # Allowlist-based shell execution
-│   │   └── http_ops.py        # Domain-allowlist HTTP (v2.0: SSRF + redirect guard)
+│   │   ├── base.py            # 抽象基类
+│   │   ├── file_ops.py        # 沙箱文件读写删（v2.0: +写前快照）
+│   │   ├── shell_ops.py       # 白名单 Shell 执行
+│   │   └── http_ops.py        # 域名白名单 HTTP（v2.0: +SSRF+重定向校验）
 │   ├── verification/
-│   │   ├── base.py            # Abstract base class
-│   │   ├── pipeline.py        # Pipeline orchestrator (supports fail_fast)
-│   │   ├── syntax_check.py    # JSON/YAML syntax validation
-│   │   ├── security_check.py  # Secret leak scanner (v2.0: +read_file +http_* output scan)
-│   │   └── result_check.py    # Exit code / integrity check
+│   │   ├── base.py            # 抽象基类
+│   │   ├── pipeline.py        # 管线编排器（支持 fail_fast）
+│   │   ├── syntax_check.py    # JSON/YAML 语法校验
+│   │   ├── security_check.py  # 密钥泄露扫描（v2.0: +read_file +http_* 输出扫描）
+│   │   └── result_check.py    # 退出码/完整性检查
 │   ├── memory/
-│   │   ├── working.py         # Working memory (v2.0: max_bytes eviction)
-│   │   ├── short_term.py      # Short-term memory (TTL cache)
-│   │   ├── long_term.py       # Long-term memory (v2.0: atomic write)
-│   │   ├── procedural.py      # v2.0: procedural memory (env snapshots → faster with use)
-│   │   ├── consistency.py     # v2.0: cross-tier consistency manager
-│   │   └── facade.py          # v2.0: MemorySystem unified facade
+│   │   ├── working.py         # 工作记忆（v2.0: max_bytes 淘汰）
+│   │   ├── short_term.py      # 短期记忆（TTL 缓存）
+│   │   ├── long_term.py       # 长期记忆（v2.0: 原子写入）
+│   │   ├── procedural.py      # v2.0: 程序性记忆（环境快照 → 越用越快）
+│   │   ├── consistency.py     # v2.0: 跨层一致性管理
+│   │   └── facade.py          # v2.0: MemorySystem 统一门面
 │   └── observability/
-│       ├── logger.py          # structlog / stdlib dual-mode
-│       └── metrics.py         # Counters, gauges, histograms
+│       ├── logger.py          # structlog / stdlib 双模
+│       └── metrics.py         # 计数器/仪表盘/直方图
 └── tests/
-    ├── verify.py              # Standalone verification (79 checks)
+    ├── verify.py              # 独立验证脚本（79 项检查）
     ├── test_rule_engine.py
-    ├── test_gateway.py        # v2.0: +structural guard +semantic classifier tests
-    ├── test_verification.py   # v2.0: +read_file +http_* output scanning tests
+    ├── test_gateway.py        # v2.0: +结构哨兵+语义分类器测试
+    ├── test_verification.py   # v2.0: +read_file +http_* 输出扫描测试
     ├── test_procedural_memory.py   # v2.0
     ├── test_memory_system.py       # v2.0
     └── test_lifecycle_v2.py        # v2.0
@@ -346,81 +346,81 @@ HiveMind/
 
 ---
 
-## Design Principles
+## 设计原则
 
-- **Immutability** — All Pydantic models are `frozen=True`; create, never mutate
-- **Constitution as Code** — Rules via JSON config, loaded dynamically with `importlib`; extend without touching source
-- **Full Audit Trail** — Gateway → Arbiter → Executor → Verification, every step traceable
-- **System 1/2 Routing** — Cache hits + low risk take the fast path; writes + high risk go through full verification → rollback on failure
-- **Defense in Depth** — Dual-layer injection (structural + semantic), SSRF protection, secret scanning, pre-mutation snapshots
-- **Atomic Persistence** — All file writes use `tempfile.mkstemp` + `os.replace` to prevent corruption on crash
-- **越用越快 (Faster with Use)** — Procedural memory records execution results with environment snapshots; reuses cached results only when the environment hasn't changed
+- **不可变数据** — 所有 Pydantic 模型 `frozen=True`，只创建不修改
+- **宪法即代码** — 规则集通过 JSON 配置，`importlib` 动态加载，无需改源码即可扩展
+- **全链路审计** — 网关→仲裁→执行→验证，每步可追溯
+- **系统 1/2 分流** — 缓存命中 + 低风险走快通道，高风险走完整验证 → 失败回滚
+- **纵深防御** — 双层注入检测（结构+语义）、SSRF 防护、密钥扫描、写前快照
+- **原子持久化** — 所有文件写入使用 `tempfile.mkstemp` + `os.replace`，防止写崩溃损坏数据
+- **越用越快** — 程序性记忆记录执行结果+环境快照；缓存复用前校验环境一致性，不一致自动降级
 
 ---
 
-## FAQ
+## 常见问题
 
-### What is the API Key for? I already have a Claude API key.
+### API Key 是什么？我用 Claude 还需要再设一个？
 
-`HIVEMIND_API_KEYS` is not a third-party service key — it's **HiveMind's own door lock**.
+`HIVEMIND_API_KEYS` 不是任何第三方服务的 Key，而是 **HiveMind 自己的门锁密码**。
 
-Your Claude API key identifies you to Anthropic. HiveMind's key identifies the MCP client to HiveMind. Two different keys for two different doors.
+Claude 的 API Key 是你和 Anthropic 之间的身份凭证，HiveMind 的 Key 是 MCP 客户端和 HiveMind 安检门之间的身份凭证——两把不同的钥匙。
 
-You can leave it empty to skip authentication entirely. Setting it just adds an extra layer so unknown MCP clients can't connect and operate on your files.
+不设也可以，留空跳过认证。设上只是多一层保障，防止不认识的 MCP 客户端连进来操作你的文件。
 
-### Why was my command blocked?
+### 为什么我的命令被拦截了？
 
-Three possible layers:
+HiveMind 有三层拦截：
 
-- **Structural Guard** — A parameter contained illegal characters, was too long, or had the wrong type. For example, a path containing `;` or a 300-character filename.
-- **Hard Gate** — Unconditional rejection. For example, `rm -rf /`, reading `/etc/passwd`, path traversal with `../` are always blocked.
-- **Soft Scoring** — Risk-weighted. Writes and deletes score lower than reads. Below threshold, human approval is required.
+- **结构哨兵** — 参数中包含非法字符、超长、或类型不匹配。例如路径中含 `;`、文件名 300 字符。
+- **硬性门控** — 无条件拒绝。比如 `rm -rf /`、读取 `/etc/passwd`、路径含 `../` 穿越——没商量。
+- **软性评分** — 按风险打分。写文件、删文件比读文件分低，低于阈值会被要求人工审批。
 
-If a safe operation is being falsely blocked, run `get_constitution` to see the active rules, then customize your `constitution.json`.
+如果你确定某个操作是安全的但被误拦了，可以用 `get_constitution` 查看当前规则，然后自定义 `constitution.json` 调整。
 
-### What happens when verification fails?
+### 验证失败会发生什么？
 
-The operation is rolled back — files are restored from pre-mutation snapshots (`.hivemind-bak`). The task is marked as failed. No partial or corrupted state is left behind.
+操作会被回滚——文件从写前快照（`.hivemind-bak`）恢复原状。任务标记为失败。不会留下任何不完整或损坏的状态。
 
-### "ImportError: cannot import name ..."
+### 报错 "ImportError: cannot import name ..."
 
-Almost always a `PYTHONPATH` issue. Make sure you're in the project root:
+绝大多数情况是因为 `PYTHONPATH` 没设对。确认在项目根目录执行：
 
 ```bash
 PYTHONPATH=src python3 -m hivemind.server
-#                          ↑ must be run from HiveMind root directory
+#                          ↑ 必须在 HiveMind 根目录执行
 ```
 
-Or skip `PYTHONPATH` entirely by installing with pip:
+如果用 pip 安装后命令行启动则不需要设 `PYTHONPATH`：
 
 ```bash
 pip install git+https://github.com/ahao0625/HiveMind.git
 hivemind
 ```
 
-### Can't install structlog?
+### structlog 安装不上怎么办？
 
-structlog is optional. Without it, HiveMind falls back to Python's standard `logging` module. All features work identically — you just get plain-text logs instead of colored structured output.
+structlog 是可选依赖，没安装时自动退回到 Python 标准库 `logging`，功能完整可用。只是日志格式从彩色结构化变成普通文本，不影响任何功能。
 
-### FileOpsExecutor: PermissionError
+### FileOpsExecutor 报 PermissionError
 
-The default sandbox directory is `$TMPDIR/hivemind-sandbox`. On some systems (e.g. macOS sandbox), writing to `/tmp` is restricted. Override it:
+默认沙箱目录在 `$TMPDIR/hivemind-sandbox`，某些系统（如 macOS 沙箱）禁止写 `/tmp`。可以手动指定：
 
 ```bash
 export HIVEMIND_SANDBOX_ROOT="$HOME/.hivemind/sandbox"
 ```
 
-### How do I add custom security rules?
+### 怎么扩展自己的安全规则？
 
-Create `~/.hivemind/constitution.json` and add your own hard gates or scoring dimensions:
+创建 `~/.hivemind/constitution.json`，添加自定义硬性门控或评分维度：
 
 ```json
 {
   "hard_gates": [
     {
       "id": "custom_rule",
-      "name": "My Custom Rule",
-      "description": "Prevents modifying .env files",
+      "name": "我的自定义规则",
+      "description": "禁止修改 .env 文件",
       "priority": 50,
       "check_function": "my_module.rules:check_env_file"
     }
@@ -428,34 +428,34 @@ Create `~/.hivemind/constitution.json` and add your own hard gates or scoring di
 }
 ```
 
-The format for `check_function` is `module.path:function_name`. HiveMind loads it dynamically via `importlib`. Function signature:
+`check_function` 格式为 `模块路径:函数名`，HiveMind 会通过 `importlib` 动态加载。函数签名：
 
 ```python
 def check_env_file(intent: RefinedIntent) -> GateResult:
     ...
 ```
 
-### How do I see what happened?
+### 怎么看到底发生了什么？
 
-Use the `get_audit_trail` tool to view the last 50 audit records. Each entry includes: timestamp, caller identity, tool name, gateway result, arbiter decision, execution result, and verification result.
+用 `get_audit_trail` 工具查看最近 50 条审计记录，每条包含：时间、调用者、工具名、网关结果、仲裁决定、执行结果、验证结果。
 
 ---
 
-## License
+## 许可
 
 MIT
 
 ---
 
-## Sponsor
+## 打赏
 
-If this project helps you, consider buying me a coffee ☕
+如果这个项目对你有帮助，欢迎请我喝杯咖啡 ☕
 
 <div align="center">
   <table>
     <tr>
-      <td align="center" width="50%"><b>WeChat</b><br><br><img src="assets/wechat.jpg" width="280"></td>
-      <td align="center" width="50%"><b>Alipay</b><br><br><img src="assets/alipay.jpg" width="280"></td>
+      <td align="center" width="50%"><b>微信</b><br><br><img src="assets/wechat.jpg" width="280"></td>
+      <td align="center" width="50%"><b>支付宝</b><br><br><img src="assets/alipay.jpg" width="280"></td>
     </tr>
   </table>
 </div>
