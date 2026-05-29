@@ -3,6 +3,7 @@
 [![Python](https://img.shields.io/badge/python-3.12%2B-blue)](https://python.org)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![MCP](https://img.shields.io/badge/MCP-1.12%2B-purple)](https://modelcontextprotocol.io)
+[English](README.md) | [中文](README_CN.md)
 
 **External Commander Framework** — AI suggests, the framework decides.
 
