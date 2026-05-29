@@ -14,7 +14,7 @@ class PipelineResult(BaseModel):
     def summary(self) -> str:
         if self.all_passed:
             return "all passed"
-        failed = [r.reason for r in self.results if not r.passed]
+        failed = [str(issue) for r in self.results if not r.passed for issue in r.issues]
         return "; ".join(failed) if failed else "verification failed"
 
 

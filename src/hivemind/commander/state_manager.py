@@ -36,7 +36,7 @@ TRANSITIONS: dict[TaskState, set[TaskState]] = {
     TaskState.COMPLETED: set(),
     TaskState.FAILED: {TaskState.ROLLING_BACK, TaskState.ESCALATED, TaskState.IDLE},
     TaskState.BLOCKED: {TaskState.ESCALATED, TaskState.IDLE},
-    TaskState.ROLLING_BACK: {TaskState.IDLE, TaskState.ESCALATED},
+    TaskState.ROLLING_BACK: {TaskState.IDLE, TaskState.ESCALATED, TaskState.FAILED},
     TaskState.ESCALATED: {TaskState.IDLE},
 }
 
