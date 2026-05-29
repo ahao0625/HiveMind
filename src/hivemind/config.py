@@ -14,7 +14,13 @@ from pydantic import BaseModel, Field
 
 class AuthConfig(BaseModel):
     enabled: bool = True
-    api_keys: list[str] = Field(default_factory=lambda: ["hivemind-dev-key"])
+    api_keys: list[str] = Field(default_factory=lambda: [
+        k for k in os.environ.get("HIVEMIND_API_KEYS", "hivemind-dev-key").split(",") if k
+    ])
+
+    def model_post_init(self, __context) -> None:
+        if not self.api_keys:
+            object.__setattr__(self, "enabled", False)
 
 
 class RateLimitConfig(BaseModel):
