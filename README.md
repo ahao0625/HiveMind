@@ -333,6 +333,84 @@ HiveMind/
 - **全链路审计** — 网关→仲裁→执行→验证，每步可追溯
 - **系统 1/2 分流** — 缓存命中 + 低风险走快通道（<10ms），高风险走完整 ReAct 验证
 
+## 常见问题
+
+### API Key 是什么？我用 Claude 还需要再设一个 Key？
+
+`HIVEMIND_API_KEYS` 不是任何第三方服务的 Key，而是 **HiveMind 自己的门锁密码**。
+
+Claude 的 API Key 是你和 Anthropic 之间的身份凭证，HiveMind 的 Key 是 MCP 客户端和 HiveMind 安检门之间的身份凭证——两把不同的钥匙。
+
+不设也可以，留空跳过认证。设上只是多一层保障，防止不认识的 MCP 客户端连进来操作你的文件。
+
+### 为什么我的命令被拦截了？
+
+HiveMind 有两层拦截：
+
+- **硬性门控** — 无条件拒绝。比如 `rm -rf /`、读取 `/etc/passwd`、路径包含 `../` 穿越，这条规则没商量
+- **软性评分** — 按风险打分。写文件、删文件比读文件分低，低于阈值会被要求人工审批
+
+如果你确定某个操作是安全的但被误拦了，可以用 `get_constitution` 查看当前规则，然后自定义 `constitution.json` 调整。
+
+### 报错 "ImportError: cannot import name ..."
+
+绝大多数情况是因为 `PYTHONPATH` 没设对。确认：
+
+```bash
+PYTHONPATH=src python3 -m hivemind.server
+#                          ↑ 必须在 HiveMind 根目录执行
+```
+
+如果用 pip 安装后命令行启动则不需要设 `PYTHONPATH`：
+
+```bash
+pip install git+https://github.com/ahao0625/HiveMind.git
+hivemind
+```
+
+### structlog 安装不上怎么办？
+
+structlog 是可选依赖，没安装时自动退回到 Python 标准库 `logging`，功能完整可用。只是日志格式从彩色结构化变成普通文本，不影响任何功能。
+
+### FileOpsExecutor 报 PermissionError
+
+默认沙箱目录在 `$TMPDIR/hivemind-sandbox`，某些系统（如 macOS 沙箱）禁止写 `/tmp`。可以手动指定：
+
+```bash
+export HIVEMIND_SANDBOX_ROOT="$HOME/.hivemind/sandbox"
+```
+
+### 怎么扩展自己的安全规则？
+
+创建 `~/.hivemind/constitution.json`，添加自定义硬性门控或评分维度：
+
+```json
+{
+  "hard_gates": [
+    {
+      "id": "custom_rule",
+      "name": "我的自定义规则",
+      "description": "禁止修改 .env 文件",
+      "priority": 50,
+      "check_function": "my_module.rules:check_env_file"
+    }
+  ]
+}
+```
+
+`check_function` 格式为 `模块路径:函数名`，HiveMind 会通过 `importlib` 动态加载。函数签名：
+
+```python
+def check_env_file(intent: RefinedIntent) -> GateResult:
+    ...
+```
+
+### 怎么看到底发生了什么？
+
+用 `get_audit_trail` 工具查看最近 50 条审计记录，每条包含：时间、调用者、工具名、网关结果、仲裁决定、执行结果、验证结果。
+
+---
+
 ## 许可
 
 MIT
